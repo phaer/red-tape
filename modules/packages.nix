@@ -2,13 +2,10 @@
 #
 # Imports each discovered package file via callPackage-style invocation.
 # Each .nix file receives: { pkgs, system, pname, lib, ... }
-#
-# Discovered paths and extraScope (perSystem, flake, inputs) are passed
-# as options by the entry point.
 
 { types, ... }:
 let
-  inherit (builtins) mapAttrs intersectAttrs functionArgs;
+  inherit (builtins) mapAttrs intersectAttrs functionArgs tryEval;
 
   filterPlatforms = import ../lib/filter-platforms.nix;
 in
@@ -40,7 +37,7 @@ in
         lib = pkgs.lib;
       } // options.extraScope;
 
-      callPkg = path: extraArgs:
+      callFile = path: extraArgs:
         let
           fn = import path;
           args = functionArgs fn;
@@ -52,7 +49,7 @@ in
         let
           path = if entry.type == "directory" then entry.path + "/default.nix" else entry.path;
         in
-        callPkg path { inherit pname; };
+        callFile path { inherit pname; };
 
       allPackages = mapAttrs buildPkg options.discovered;
     in
