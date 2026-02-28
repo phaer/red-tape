@@ -18,8 +18,9 @@ in
   };
 
   testNixosModuleNames = {
-    expr = builtins.attrNames full.modules.nixos;
-    expected = [ "server" ];
+    expr = builtins.sort builtins.lessThan
+      (builtins.attrNames full.modules.nixos);
+    expected = [ "injected" "server" ];
   };
 
   testHomeModuleNames = {
@@ -34,8 +35,9 @@ in
 
   # Well-known aliases
   testNixosModulesAlias = {
-    expr = builtins.attrNames full.nixosModules;
-    expected = [ "server" ];
+    expr = builtins.sort builtins.lessThan
+      (builtins.attrNames full.nixosModules);
+    expected = [ "injected" "server" ];
   };
 
   testDarwinModulesAlias = {
@@ -46,6 +48,18 @@ in
   testHomeModulesAlias = {
     expr = builtins.attrNames full.homeModules;
     expected = [ "shared" ];
+  };
+
+  # Plain modules (no publisher args) are re-exported as paths
+  testPlainModuleIsPath = {
+    expr = builtins.isPath full.modules.nixos.server;
+    expected = true;
+  };
+
+  # Publisher-args modules are called and return a function (the inner module)
+  testInjectedModuleIsFunction = {
+    expr = builtins.isFunction full.modules.nixos.injected;
+    expected = true;
   };
 
   # Empty project

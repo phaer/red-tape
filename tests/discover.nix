@@ -100,8 +100,9 @@ in
   };
 
   testDiscoverNixosModules = {
-    expr = builtins.attrNames (discover (fixtures + "/full")).modules.nixos;
-    expected = [ "server" ];
+    expr = builtins.sort builtins.lessThan
+      (builtins.attrNames (discover (fixtures + "/full")).modules.nixos);
+    expected = [ "injected" "server" ];
   };
 
   testDiscoverHomeModules = {

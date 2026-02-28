@@ -21,11 +21,14 @@ let
     inputs = flakeInputs // (if self != null then { self = self; } else {});
   };
 
-  # Check if a value is a function that only takes publisher args
+  # Check if a value is a function that explicitly takes publisher args.
+  # Must have at least one named arg (excludes `{ ... }:` catch-all).
   expectsPublisherArgs = fn:
-    isFunction fn
+    let args = functionArgs fn;
+    in isFunction fn
+    && args != {}
     && builtins.all (arg: builtins.elem arg (attrNames publisherArgs))
-      (attrNames (functionArgs fn));
+      (attrNames args);
 
   # Import a module path, injecting publisher args if needed
   importModule = entry:
