@@ -1,17 +1,35 @@
-# Tests for module export
+# Tests for module export via adios module
 let
-  buildModules = import ../lib/build-modules.nix {
-    flakeInputs = {};
-    self = null;
-  };
-  discover = import ../modules/discover.nix;
-  fixtures = ../tests/fixtures;
+  prelude = import ./prelude.nix;
+  inherit (prelude) adios fixtures;
 
-  full = buildModules (discover (fixtures + "/full")).modules;
-  empty = buildModules (discover (fixtures + "/empty")).modules;
+  discover = import ../modules/discover.nix;
+  callMod = path: import path adios;
+
+  evalModulesExport = discoveredModules:
+    let
+      loaded = adios {
+        name = "modexp-test";
+        modules = {
+          modules-export = callMod ../modules/modules-export.nix;
+        };
+      };
+      evaled = loaded.eval {
+        options = {
+          "/modules-export" = {
+            discovered = discoveredModules;
+            flakeInputs = {};
+            self = null;
+          };
+        };
+      };
+    in
+    evaled.root.modules.modules-export {};
+
+  full = evalModulesExport (discover (fixtures + "/full")).modules;
+  empty = evalModulesExport (discover (fixtures + "/empty")).modules;
 in
 {
-  # Well-known aliases are the only output keys
   testOutputKeys = {
     expr = builtins.sort builtins.lessThan (builtins.attrNames full);
     expected = [ "darwinModules" "homeModules" "nixosModules" ];
@@ -32,19 +50,16 @@ in
     expected = [ "defaults" ];
   };
 
-  # Plain modules (no publisher args) are re-exported as paths
   testPlainModuleIsPath = {
     expr = builtins.isPath full.nixosModules.server;
     expected = true;
   };
 
-  # Publisher-args modules are called and return a function (the inner module)
   testInjectedModuleIsFunction = {
     expr = builtins.isFunction full.nixosModules.injected;
     expected = true;
   };
 
-  # Empty project produces no output
   testEmptyModules = {
     expr = empty;
     expected = {};

@@ -50,6 +50,8 @@ let
     // (if discovered.devshells != {} then { devshells = callMod ../modules/devshells.nix; } else {})
     // (if discovered.checks != {} then { checks = callMod ../modules/checks.nix; } else {})
     // (if discovered.overlays != {} then { overlays = callMod ../modules/overlays.nix; } else {})
+    // (if discovered.hosts != {} then { hosts = callMod ../modules/hosts.nix; } else {})
+    // (if discovered.modules != {} then { modules-export = callMod ../modules/modules-export.nix; } else {})
     // extraModules;
 
   mkExtraScope = { flakeInputs ? {}, self ? null, perSystem ? {} }:
@@ -59,7 +61,11 @@ let
     // (if allInputs != {} then { inputs = allInputs; } else {});
 
   # Build adios options — only emits entries for modules in the tree.
-  mkOptions = { modules, discovered, configOptions, extraScope ? {} }: nixpkgsOpt:
+  mkOptions =
+    { modules, discovered, configOptions
+    , extraScope ? {}
+    , flakeInputs ? {}, self ? null
+    }: nixpkgsOpt:
     { "/nixpkgs" = nixpkgsOpt;
       "/formatter" = { formatterPath = discovered.formatter; inherit extraScope; };
     }
@@ -75,10 +81,16 @@ let
     // (if modules ? overlays then {
       "/overlays" = { discovered = discovered.overlays; inherit extraScope; };
     } else {})
+    // (if modules ? hosts then {
+      "/hosts" = { discovered = discovered.hosts; inherit flakeInputs self; };
+    } else {})
+    // (if modules ? modules-export then {
+      "/modules-export" = { discovered = discovered.modules; inherit flakeInputs self; };
+    } else {})
     // configOptions;
 
-  # Collect results — only calls modules that are in the tree.
-  collectResults = { evaled, system }:
+  # Collect per-system results from the evaluated tree.
+  collectPerSystem = { evaled, system }:
     let
       mods = evaled.root.modules;
       has = name: mods ? ${name};
@@ -89,7 +101,6 @@ let
       chkResult = if has "checks"    then mods.checks {}     else { checks = {}; };
       ovlResult = if has "overlays"  then mods.overlays {}   else { overlays = {}; };
 
-      # Auto-checks from packages
       packageChecks =
         withPrefix "pkgs-" pkgResult.filteredPackages
         // listToAttrs (concatMap (pname:
@@ -103,7 +114,6 @@ let
           }) (attrNames tests)
         ) (attrNames pkgResult.filteredPackages));
 
-      # Auto-checks from devshells
       devshellChecks = withPrefix "devshell-" devResult.devShells;
     in
     { packages = pkgResult.filteredPackages;
@@ -112,6 +122,16 @@ let
       checks = packageChecks // devshellChecks // chkResult.checks;
     }
     // (if ovlResult.overlays != {} then { overlays = ovlResult.overlays; } else {});
+
+  # Collect system-agnostic results (evaluated once, not transposed).
+  collectAgnostic = evaled:
+    let
+      mods = evaled.root.modules;
+      has = name: mods ? ${name};
+      hostResult = if has "hosts" then mods.hosts {} else {};
+      modExpResult = if has "modules-export" then mods.modules-export {} else {};
+    in
+    hostResult // modExpResult;
 
   # Import lib, handling both function and plain attrset forms
   importLib = { libPath, flake ? null, inputs ? {} }:
@@ -172,7 +192,7 @@ let
           extraScope = mkExtraScope { inherit flakeInputs self perSystem; };
         in
         mkOptions {
-          inherit modules discovered configOptions extraScope;
+          inherit modules discovered configOptions extraScope flakeInputs self;
         } {
           inherit system;
           pkgs = nixpkgsFor system;
@@ -180,28 +200,25 @@ let
 
       firstSystem = head systems;
       firstEvaled = loaded.eval { options = mkOpts firstSystem; };
-      firstResult = collectResults { evaled = firstEvaled; system = firstSystem; };
+      firstResult = collectPerSystem { evaled = firstEvaled; system = firstSystem; };
 
       otherResults = listToAttrs (map (sys:
         let overridden = firstEvaled.override { options = mkOpts sys; };
-        in { name = sys; value = collectResults { evaled = overridden; system = sys; }; }
+        in { name = sys; value = collectPerSystem { evaled = overridden; system = sys; }; }
       ) (tail systems));
 
       allPerSystem = { ${firstSystem} = firstResult; } // otherResults;
       transposed = transpose allPerSystem;
 
-      # System-agnostic outputs
-      buildModules = import ./build-modules.nix { inherit flakeInputs self; };
-      buildHosts = import ./build-hosts.nix { inherit flakeInputs self; };
+      # System-agnostic: from adios modules (memoized, evaluated once)
+      agnosticFromModules = collectAgnostic firstEvaled;
 
-      modulesOutput = buildModules discovered.modules;
-      hostsOutput = buildHosts discovered.hosts;
+      # System-agnostic: from plain functions (templates, lib)
       templatesOutput = buildTemplates discovered.templates;
       libOutput = importLib { libPath = discovered.lib; flake = self; inputs = allInputs; };
 
       agnosticOutputs =
-        hostsOutput
-        // modulesOutput
+        agnosticFromModules
         // (if templatesOutput != {} then { templates = templatesOutput; } else {})
         // (if libOutput != {} then { lib = libOutput; } else {});
 
@@ -250,12 +267,13 @@ let
       } { inherit system pkgs; };
 
       evaled = loaded.eval { options = opts; };
-      result = collectResults { inherit evaled system; };
+      result = collectPerSystem { inherit evaled system; };
+      agnostic = collectAgnostic evaled;
 
       templatesOutput = buildTemplates discovered.templates;
       libOutput = importLib { libPath = discovered.lib; };
     in
-    result // {
+    result // agnostic // {
       shell = result.devShells.default or null;
     }
     // (if templatesOutput != {} then { templates = templatesOutput; } else {})

@@ -1,54 +1,72 @@
-# Tests for host building
+# Tests for host building via adios module
 let
-  discover = import ../modules/discover.nix;
-  fixtures = ../tests/fixtures;
+  prelude = import ./prelude.nix;
+  inherit (prelude) adios fixtures;
 
-  buildHosts = import ../lib/build-hosts.nix {
-    flakeInputs = {};
-    self = null;
-  };
+  discover = import ../modules/discover.nix;
+  callMod = path: import path adios;
 
   fullHosts = (discover (fixtures + "/full")).hosts;
 
-  # Both custom and mymac use the escape hatch (avoids real nixpkgs/nix-darwin)
-  testHosts = buildHosts {
+  # Evaluate the hosts module directly
+  evalHosts = discoveredHosts:
+    let
+      loaded = adios {
+        name = "hosts-test";
+        modules = {
+          hosts = callMod ../modules/hosts.nix;
+        };
+      };
+      evaled = loaded.eval {
+        options = {
+          "/hosts" = {
+            discovered = discoveredHosts;
+            flakeInputs = {};
+            self = null;
+          };
+        };
+      };
+    in
+    evaled.root.modules.hosts {};
+
+  # Both custom and mymac use the escape hatch
+  testResult = evalHosts {
     inherit (fullHosts) custom mymac;
   };
 in
 {
   testCustomHostLoaded = {
-    expr = testHosts.nixosConfigurations.custom._type;
+    expr = testResult.nixosConfigurations.custom._type;
     expected = "test-nixos-system";
   };
 
   testCustomHostName = {
-    expr = testHosts.nixosConfigurations.custom.hostName;
+    expr = testResult.nixosConfigurations.custom.hostName;
     expected = "custom";
   };
 
   testDarwinHostLoaded = {
-    expr = testHosts.darwinConfigurations.mymac._type;
+    expr = testResult.darwinConfigurations.mymac._type;
     expected = "test-darwin-system";
   };
 
   testDarwinHostName = {
-    expr = testHosts.darwinConfigurations.mymac.hostName;
+    expr = testResult.darwinConfigurations.mymac.hostName;
     expected = "mymac";
   };
 
-  # nixos and darwin are separated correctly
   testDarwinNotInNixos = {
-    expr = testHosts.nixosConfigurations ? mymac;
+    expr = testResult.nixosConfigurations ? mymac;
     expected = false;
   };
 
   testNixosNotInDarwin = {
-    expr = testHosts.darwinConfigurations ? custom;
+    expr = testResult.darwinConfigurations ? custom;
     expected = false;
   };
 
   testEmptyHosts = {
-    expr = buildHosts {};
+    expr = evalHosts {};
     expected = {
       nixosConfigurations = {};
       darwinConfigurations = {};
@@ -65,7 +83,7 @@ in
       };
     expected = {
       myhost = "nixos";
-      mymac = "custom";  # uses default.nix escape hatch
+      mymac = "custom";
       custom = "custom";
     };
   };
