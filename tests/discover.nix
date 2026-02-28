@@ -75,7 +75,7 @@ in
     expr =
       let hosts = (discover (fixtures + "/full")).hosts;
       in builtins.sort builtins.lessThan (builtins.attrNames hosts);
-    expected = [ "myhost" "mymac" ];
+    expected = [ "custom" "myhost" "mymac" ];
   };
 
   testHostConfigTypes = {

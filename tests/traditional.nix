@@ -59,4 +59,23 @@ in
     }).packages;
     expected = [ "default" ];
   };
+
+  # eval exports templates (system-agnostic)
+  testEvalTemplates = {
+    expr = builtins.sort builtins.lessThan
+      (builtins.attrNames (redTape.eval {
+        pkgs = mockPkgs;
+        src = fixtures + "/full";
+      }).templates);
+    expected = [ "default" "minimal" ];
+  };
+
+  # eval exports lib (system-agnostic)
+  testEvalLib = {
+    expr = (redTape.eval {
+      pkgs = mockPkgs;
+      src = fixtures + "/full";
+    }).lib.greet "nix";
+    expected = "Hello, nix!";
+  };
 }

@@ -30,6 +30,7 @@ let
   transpose = import ./transpose.nix;
   filterPlatforms = import ./filter-platforms.nix;
   discover = import ../modules/discover.nix;
+  buildTemplates = import ./build-templates.nix;
 
   # Prefix all keys of an attrset
   withPrefix = prefix: attrs:
@@ -247,8 +248,28 @@ let
       # Transpose to flake output shape
       transposed = transpose allPerSystem;
 
-      # System-agnostic outputs (Phase 2: hosts, modules, templates, lib)
-      agnosticOutputs = {};
+      # System-agnostic outputs
+      buildModules = import ./build-modules.nix { inherit flakeInputs self; };
+      buildHosts = import ./build-hosts.nix { inherit flakeInputs self; };
+
+      modulesOutput = buildModules discovered.modules;
+      hostsOutput = buildHosts discovered.hosts;
+      templatesOutput = buildTemplates discovered.templates;
+
+      libOutput =
+        if discovered.lib != null then
+          import discovered.lib {
+            flake = self;
+            inputs = flakeInputs // (if self != null then { self = self; } else {});
+          }
+        else
+          {};
+
+      agnosticOutputs =
+        hostsOutput
+        // modulesOutput
+        // (if templatesOutput != {} then { templates = templatesOutput; } else {})
+        // (if libOutput != {} then { lib = libOutput; } else {});
 
     in
     transposed // agnosticOutputs;
@@ -303,11 +324,24 @@ let
       };
 
       result = collectResults evaled system discovered;
+
+      templatesOutput = buildTemplates discovered.templates;
+
+      libOutput =
+        if discovered.lib != null then
+          import discovered.lib {
+            flake = null;
+            inputs = {};
+          }
+        else
+          {};
     in
     result // {
       # Convenience alias
       shell = result.devShells.default or null;
-    };
+    }
+    // (if templatesOutput != {} then { templates = templatesOutput; } else {})
+    // (if libOutput != {} then { lib = libOutput; } else {});
 
 in
 {
