@@ -1,6 +1,6 @@
 result
 result-*
-.direnv
+.direnv/
 _adios/
 _adios-flake/
 _blueprint/

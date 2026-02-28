@@ -32,6 +32,13 @@ let
   discover = import ../modules/discover.nix;
   buildTemplates = import ./build-templates.nix;
 
+  # Convert config parameter to adios option paths
+  mkConfigOptions = config:
+    listToAttrs (map (key: {
+      name = "/${key}";
+      value = config.${key};
+    }) (attrNames config));
+
   # Prefix all keys of an attrset
   withPrefix = prefix: attrs:
     listToAttrs (map (name: {
@@ -167,11 +174,7 @@ let
             inherit overlays;
           };
 
-      # Convert config parameter to adios option paths
-      configOptions = listToAttrs (map (key: {
-        name = "/${key}";
-        value = config.${key};
-      }) (attrNames config));
+      configOptions = mkConfigOptions config;
 
       mkOptions = system:
         let
@@ -270,10 +273,7 @@ let
 
       rootDef = mkRootDef { inherit extraModules; };
 
-      configOptions = listToAttrs (map (key: {
-        name = "/${key}";
-        value = config.${key};
-      }) (attrNames config));
+      configOptions = mkConfigOptions config;
 
       loaded = adios rootDef;
       evaled = loaded.eval {
