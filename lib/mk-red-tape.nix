@@ -37,6 +37,9 @@ let
       value = attrs.${name};
     }) (attrNames attrs));
 
+  mkAllInputs = flakeInputs: self:
+    flakeInputs // (if self != null then { self = self; } else {});
+
   # Only include adios modules for outputs that have discovered content.
   # /nixpkgs and /formatter are always present (formatter has a fallback).
   mkModules = { discovered, extraModules ? {} }:
@@ -48,59 +51,38 @@ let
     // (if discovered.checks != {} then { checks = callMod ../modules/checks.nix; } else {})
     // extraModules;
 
-  mkPerSystem = flakeInputs: self: system:
-    let
-      base = mapAttrs (_name: input:
-        if builtins.isAttrs input then
-          (input.legacyPackages.${system} or {})
-          // (input.packages.${system} or {})
-        else
-          input
-      ) flakeInputs;
-    in
-    if self != null then
-      base // {
-        self = (self.legacyPackages.${system} or {}) // (self.packages.${system} or {});
-      }
-    else
-      base;
-
   mkExtraScope = { flakeInputs ? {}, self ? null, perSystem ? {} }:
-    { inherit perSystem; }
+    let allInputs = mkAllInputs flakeInputs self;
+    in { inherit perSystem; }
     // (if self != null then { flake = self; } else {})
-    // (if flakeInputs != {} || self != null then {
-      inputs = flakeInputs // (if self != null then { self = self; } else {});
-    } else {});
+    // (if allInputs != {} then { inputs = allInputs; } else {});
 
-  # Build options for present modules only
-  mkOptions = { discovered, configOptions, extraScope ? {} }: system: nixpkgsOpt:
-    { "/nixpkgs" = nixpkgsOpt; }
-    // (if discovered.packages != {} then {
+  # Build adios options — only emits entries for modules in the tree.
+  mkOptions = { modules, discovered, configOptions, extraScope ? {} }: nixpkgsOpt:
+    { "/nixpkgs" = nixpkgsOpt;
+      "/formatter" = { formatterPath = discovered.formatter; inherit extraScope; };
+    }
+    // (if modules ? packages then {
       "/packages" = { discovered = discovered.packages; inherit extraScope; };
     } else {})
-    // (if discovered.devshells != {} then {
+    // (if modules ? devshells then {
       "/devshells" = { discovered = discovered.devshells; inherit extraScope; };
     } else {})
-    // { "/formatter" = {
-        formatterPath = discovered.formatter;
-        inherit extraScope;
-      };
-    }
-    // (if discovered.checks != {} then {
+    // (if modules ? checks then {
       "/checks" = { discovered = discovered.checks; inherit extraScope; };
     } else {})
     // configOptions;
 
   # Collect results — only calls modules that are in the tree.
-  collectResults = { evaled, system, discovered }:
+  collectResults = { evaled, system }:
     let
       mods = evaled.root.modules;
       has = name: mods ? ${name};
 
-      pkgResult    = if has "packages"  then mods.packages {}  else { filteredPackages = {}; };
-      devResult    = if has "devshells" then mods.devshells {}  else { devShells = {}; };
-      fmtResult    = mods.formatter {};
-      chkResult    = if has "checks"    then mods.checks {}    else { checks = {}; };
+      pkgResult = if has "packages"  then mods.packages {}  else { filteredPackages = {}; };
+      devResult = if has "devshells" then mods.devshells {}  else { devShells = {}; };
+      fmtResult = mods.formatter {};
+      chkResult = if has "checks"    then mods.checks {}    else { checks = {}; };
 
       # Auto-checks from packages
       packageChecks =
@@ -126,6 +108,14 @@ let
       checks = packageChecks // devshellChecks // chkResult.checks;
     };
 
+  # Import lib, handling both function and plain attrset forms
+  importLib = { libPath, flake ? null, inputs ? {} }:
+    if libPath == null then {}
+    else
+      let mod = import libPath;
+      in if builtins.isFunction mod then mod { inherit flake inputs; }
+         else mod;
+
   # ── Flake entry point ──────────────────────────────────────────────
 
   mkFlake =
@@ -141,6 +131,7 @@ let
     }:
     let
       flakeInputs = builtins.removeAttrs inputs [ "self" ];
+      allInputs = mkAllInputs flakeInputs self;
 
       resolvedSrc =
         if prefix != null then
@@ -176,19 +167,19 @@ let
           extraScope = mkExtraScope { inherit flakeInputs self perSystem; };
         in
         mkOptions {
-          inherit discovered configOptions extraScope;
-        } system {
+          inherit modules discovered configOptions extraScope;
+        } {
           inherit system;
           pkgs = nixpkgsFor system;
         };
 
       firstSystem = head systems;
       firstEvaled = loaded.eval { options = mkOpts firstSystem; };
-      firstResult = collectResults { evaled = firstEvaled; system = firstSystem; inherit discovered; };
+      firstResult = collectResults { evaled = firstEvaled; system = firstSystem; };
 
       otherResults = listToAttrs (map (sys:
         let overridden = firstEvaled.override { options = mkOpts sys; };
-        in { name = sys; value = collectResults { evaled = overridden; system = sys; inherit discovered; }; }
+        in { name = sys; value = collectResults { evaled = overridden; system = sys; }; }
       ) (tail systems));
 
       allPerSystem = { ${firstSystem} = firstResult; } // otherResults;
@@ -201,15 +192,7 @@ let
       modulesOutput = buildModules discovered.modules;
       hostsOutput = buildHosts discovered.hosts;
       templatesOutput = buildTemplates discovered.templates;
-
-      libOutput =
-        if discovered.lib != null then
-          import discovered.lib {
-            flake = self;
-            inputs = flakeInputs // (if self != null then { self = self; } else {});
-          }
-        else
-          {};
+      libOutput = importLib { libPath = discovered.lib; flake = self; inputs = allInputs; };
 
       agnosticOutputs =
         hostsOutput
@@ -219,6 +202,25 @@ let
 
     in
     transposed // agnosticOutputs;
+
+  # ── Helpers ─────────────────────────────────────────────────────────
+
+  mkPerSystem = flakeInputs: self: system:
+    let
+      base = mapAttrs (_name: input:
+        if builtins.isAttrs input then
+          (input.legacyPackages.${system} or {})
+          // (input.packages.${system} or {})
+        else
+          input
+      ) flakeInputs;
+    in
+    if self != null then
+      base // {
+        self = (self.legacyPackages.${system} or {}) // (self.packages.${system} or {});
+      }
+    else
+      base;
 
   # ── Traditional entry point ─────────────────────────────────────────
 
@@ -239,19 +241,14 @@ let
       loaded = adios { name = "red-tape"; inherit modules; };
 
       opts = mkOptions {
-        inherit discovered configOptions extraScope;
-      } system { inherit system pkgs; };
+        inherit modules discovered configOptions extraScope;
+      } { inherit system pkgs; };
 
       evaled = loaded.eval { options = opts; };
-      result = collectResults { inherit evaled system discovered; };
+      result = collectResults { inherit evaled system; };
 
       templatesOutput = buildTemplates discovered.templates;
-
-      libOutput =
-        if discovered.lib != null then
-          import discovered.lib { flake = null; inputs = {}; }
-        else
-          {};
+      libOutput = importLib { libPath = discovered.lib; };
     in
     result // {
       shell = result.devShells.default or null;

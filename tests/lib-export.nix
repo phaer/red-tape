@@ -23,4 +23,15 @@ in
     expr = (discover (fixtures + "/empty")).lib;
     expected = null;
   };
+
+  # Plain attrset lib (no { flake, inputs } wrapper)
+  testPlainLib = {
+    expr =
+      let
+        libPath = (discover (fixtures + "/plain-lib")).lib;
+        lib = import libPath;
+      in
+      lib.add 1 2;
+    expected = 3;
+  };
 }
