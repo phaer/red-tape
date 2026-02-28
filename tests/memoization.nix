@@ -5,9 +5,9 @@
 # 2. Memoizes modules that DON'T depend on changed inputs
 # 3. Produces correct results for all systems
 #
-# In red-tape's Phase 1, all modules depend on /nixpkgs, so memoization
-# of system-independent adios modules will matter in Phase 2 (hosts,
-# templates, etc.). Discovery is already memoized by being outside the tree.
+# All per-system modules depend on /nixpkgs, so memoization benefits
+# system-independent adios modules (if any are added). Discovery and
+# system-agnostic outputs are already outside the tree.
 #
 # These tests verify the adios memoization mechanism itself works correctly
 # with our module patterns, using builtins.trace to detect re-evaluation
@@ -39,7 +39,7 @@ let
       };
 
       # System-independent: no /nixpkgs dependency
-      # (This models Phase 2 modules like /hosts, /templates, /modules-export)
+      # (Models any future system-independent adios modules)
       pure = {
         name = "pure";
         options.data = { type = adios.types.attrs; default = { answer = 42; }; };
