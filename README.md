@@ -1,6 +1,6 @@
 # red-tape
 
-Convention-based Nix project builder on top of [adios](https://github.com/msteen/adios).
+Convention-based Nix project builder on top of [adios](https://github.com/adisbladis/adios).
 
 Drop `.nix` files in the right directories, get flake outputs with zero boilerplate.
 
@@ -30,13 +30,16 @@ your-project/
 ├── formatter.nix            → formatter (fallback: nixfmt-tree)
 ├── checks/
 │   └── lint.nix             → checks.lint
+├── overlay.nix              → overlays.default
+├── overlays/
+│   └── my-tools.nix         → overlays.my-tools
 ├── hosts/
 │   ├── myhost/
-│   │   └── configuration.nix      → nixosConfigurations.myhost
-│   └── mymac/
+│   │   └── configuration.nix       → nixosConfigurations.myhost
+│   ├── mymac/
 │   │   └── darwin-configuration.nix → darwinConfigurations.mymac
 │   └── custom/
-│       └── default.nix             → escape hatch (returns { class, value })
+│       └── default.nix              → escape hatch (returns { class, value })
 ├── modules/
 │   ├── nixos/server.nix     → nixosModules.server
 │   ├── darwin/defaults.nix  → darwinModules.defaults
@@ -44,7 +47,7 @@ your-project/
 ├── templates/
 │   ├── default/             → templates.default
 │   └── minimal/             → templates.minimal
-└── lib/default.nix          → lib (receives { flake, inputs })
+└── lib/default.nix          → lib
 ```
 
 ## How It Works
@@ -53,25 +56,45 @@ your-project/
 2. **Evaluate** — Per-system outputs go through adios modules for memoization
 3. **Assemble** — Auto-checks from packages and devshells, system-agnostic outputs merged
 
+All modules are conditional — only included in the adios tree when the
+corresponding directory or file exists. An empty project produces an empty
+tree.
+
 ### Per-System Outputs (transposed across systems)
 
-| Directory | Output | Notes |
+| Convention | Output | Notes |
 |-----------|--------|-------|
 | `package.nix` / `packages/` | `packages.<name>` | Files receive `{ pkgs, pname, lib, ... }` |
-| `devshell.nix` / `devshells/` | `devShells.<name>` | Files receive `{ pkgs, pname, lib, ... }` |
-| `formatter.nix` | `formatter` | Falls back to `nixfmt-tree` |
-| `checks/` | `checks.<name>` | Files receive `{ pkgs, pname, lib, ... }` |
+| `devshell.nix` / `devshells/` | `devShells.<name>` | same |
+| `formatter.nix` | `formatter` | Fallback: `nixfmt-tree` |
+| `checks/` | `checks.<name>` | same |
+| `overlay.nix` / `overlays/` | `overlays.<name>` | Must return a nixpkgs overlay |
 
 ### System-Agnostic Outputs
 
-| Directory | Output | Notes |
+| Convention | Output | Notes |
 |-----------|--------|-------|
 | `hosts/*/configuration.nix` | `nixosConfigurations.*` | specialArgs: `{ flake, inputs, hostName }` |
 | `hosts/*/darwin-configuration.nix` | `darwinConfigurations.*` | Requires `inputs.nix-darwin` |
 | `hosts/*/default.nix` | classified by returned `class` | Escape hatch |
-| `modules/<type>/` | `nixosModules`, `darwinModules`, `homeModules` | Path re-export |
-| `templates/*/` | `templates.*` | Description from `flake.nix` |
-| `lib/default.nix` | `lib` | Receives `{ flake, inputs }` |
+| `modules/nixos/` | `nixosModules.*` | Path re-export |
+| `modules/darwin/` | `darwinModules.*` | Path re-export |
+| `modules/home/` | `homeModules.*` | Path re-export |
+| `templates/*/` | `templates.*` | Description from template's `flake.nix` |
+| `lib/default.nix` | `lib` | Optionally receives `{ flake, inputs }` |
+
+### Overlays
+
+Overlay files receive the standard callPackage scope and must return a
+nixpkgs overlay function (`final: prev: { ... }`):
+
+```nix
+# overlays/my-tools.nix
+{ lib, ... }:
+final: prev: {
+  my-tool = final.callPackage ./my-tool.nix {};
+}
+```
 
 ### Auto-Checks
 
@@ -85,8 +108,8 @@ User-defined checks in `checks/` take precedence over auto-generated ones.
 
 ## CallPackage Scope
 
-Every `.nix` file under `packages/`, `devshells/`, `checks/`, and `formatter.nix`
-is called with arguments matched from:
+Every `.nix` file under `packages/`, `devshells/`, `checks/`, `overlays/`,
+and `formatter.nix` is called with arguments matched from:
 
 | Arg | Value |
 |-----|-------|
@@ -152,19 +175,20 @@ red-tape.eval {
 }
 ```
 
-Returns `{ packages, devShells, formatter, checks, shell, ... }`.
+Returns `{ packages, devShells, formatter, checks, overlays, shell, ... }`.
 
 ## Architecture
 
-Built on [adios](https://github.com/msteen/adios) for evaluation memoization.
-The adios module tree has five nodes:
+Built on [adios](https://github.com/adisbladis/adios) for evaluation memoization.
+Per-system adios modules (all conditional on discovery):
 
 ```
 /nixpkgs    — data-only: { system, pkgs }
 /packages   — builds packages from discovered paths
 /devshells  — builds devshells from discovered paths
-/formatter  — selects formatter
+/formatter  — selects formatter (fallback nixfmt-tree)
 /checks     — builds user-defined checks
+/overlays   — builds nixpkgs overlays
 ```
 
 Discovery is a **plain function** (not an adios module) — its results are
