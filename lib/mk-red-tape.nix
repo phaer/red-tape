@@ -1,18 +1,8 @@
 # mk-red-tape.nix — Core entry point logic shared by flake and traditional modes
 #
-# Constructs the adios module tree, evaluates it for each system,
-# and assembles the final output.
-#
-# Adios API:
-#   loaded  = adios rootDef              → { eval, root }
-#   evaled  = loaded.eval { options }    → { evalParams, override, root }
-#   result  = evaled.root.modules.<name> {}  → impl return value
-#   evaled2 = evaled.override { options }    → same shape as eval result
-#
-# Data flow:
-#   Discovery runs as a plain function (not an adios module).
-#   Discovered paths are passed as options to per-system modules.
-#   The entry point calls each module through the tree and assembles results.
+# Only includes adios modules for outputs that exist in the source tree.
+# If there are no packages/, no devshells/, etc., those modules are not
+# in the tree at all — zero overhead.
 
 { adios }:
 
@@ -20,6 +10,7 @@ let
   inherit (builtins)
     attrNames
     concatMap
+    filter
     head
     tail
     listToAttrs
@@ -32,37 +23,31 @@ let
   discover = import ../modules/discover.nix;
   buildTemplates = import ./build-templates.nix;
 
-  # Convert config parameter to adios option paths
+  callMod = path: import path adios;
+
   mkConfigOptions = config:
     listToAttrs (map (key: {
       name = "/${key}";
       value = config.${key};
     }) (attrNames config));
 
-  # Prefix all keys of an attrset
   withPrefix = prefix: attrs:
     listToAttrs (map (name: {
       name = "${prefix}${name}";
       value = attrs.${name};
     }) (attrNames attrs));
 
-  # Build the adios module tree definition from our modules.
-  mkRootDef = { extraModules ? {} }:
-    let
-      callMod = path: import path adios;
-    in
-    {
-      name = "red-tape";
-      modules = {
-        nixpkgs   = callMod ../modules/nixpkgs.nix;
-        packages  = callMod ../modules/packages.nix;
-        devshells = callMod ../modules/devshells.nix;
-        formatter = callMod ../modules/formatter.nix;
-        checks    = callMod ../modules/checks.nix;
-      } // extraModules;
-    };
+  # Only include adios modules for outputs that have discovered content.
+  # /nixpkgs and /formatter are always present (formatter has a fallback).
+  mkModules = { discovered, extraModules ? {} }:
+    { nixpkgs   = callMod ../modules/nixpkgs.nix;
+      formatter = callMod ../modules/formatter.nix;
+    }
+    // (if discovered.packages != {} then { packages  = callMod ../modules/packages.nix; } else {})
+    // (if discovered.devshells != {} then { devshells = callMod ../modules/devshells.nix; } else {})
+    // (if discovered.checks != {} then { checks = callMod ../modules/checks.nix; } else {})
+    // extraModules;
 
-  # Build the perSystem attrset for a given system from flake inputs.
   mkPerSystem = flakeInputs: self: system:
     let
       base = mapAttrs (_name: input:
@@ -80,7 +65,6 @@ let
     else
       base;
 
-  # Build the extra scope injected into callPackage for user files.
   mkExtraScope = { flakeInputs ? {}, self ? null, perSystem ? {} }:
     { inherit perSystem; }
     // (if self != null then { flake = self; } else {})
@@ -88,19 +72,37 @@ let
       inputs = flakeInputs // (if self != null then { self = self; } else {});
     } else {});
 
-  # Collect results from an evaluated tree for one system.
-  # Calls each module through the tree and assembles the output.
-  collectResults = evaled: system: discovered:
+  # Build options for present modules only
+  mkOptions = { discovered, configOptions, extraScope ? {} }: system: nixpkgsOpt:
+    { "/nixpkgs" = nixpkgsOpt; }
+    // (if discovered.packages != {} then {
+      "/packages" = { discovered = discovered.packages; inherit extraScope; };
+    } else {})
+    // (if discovered.devshells != {} then {
+      "/devshells" = { discovered = discovered.devshells; inherit extraScope; };
+    } else {})
+    // { "/formatter" = {
+        formatterPath = discovered.formatter;
+        inherit extraScope;
+      };
+    }
+    // (if discovered.checks != {} then {
+      "/checks" = { discovered = discovered.checks; inherit extraScope; };
+    } else {})
+    // configOptions;
+
+  # Collect results — only calls modules that are in the tree.
+  collectResults = { evaled, system, discovered }:
     let
       mods = evaled.root.modules;
+      has = name: mods ? ${name};
 
-      # Call each module (passes {} = no extra options)
-      pkgResult = mods.packages {};
-      devResult = mods.devshells {};
-      fmtResult = mods.formatter {};
-      chkResult = mods.checks {};
+      pkgResult    = if has "packages"  then mods.packages {}  else { filteredPackages = {}; };
+      devResult    = if has "devshells" then mods.devshells {}  else { devShells = {}; };
+      fmtResult    = mods.formatter {};
+      chkResult    = if has "checks"    then mods.checks {}    else { checks = {}; };
 
-      # Auto-checks: packages + passthru.tests + devshells
+      # Auto-checks from packages
       packageChecks =
         withPrefix "pkgs-" pkgResult.filteredPackages
         // listToAttrs (concatMap (pname:
@@ -114,34 +116,27 @@ let
           }) (attrNames tests)
         ) (attrNames pkgResult.filteredPackages));
 
+      # Auto-checks from devshells
       devshellChecks = withPrefix "devshell-" devResult.devShells;
     in
     {
       packages = pkgResult.filteredPackages;
       devShells = devResult.devShells;
       formatter = fmtResult.formatter;
-      # User checks take precedence over auto-checks
       checks = packageChecks // devshellChecks // chkResult.checks;
     };
 
-  # Main flake-mode entry point
+  # ── Flake entry point ──────────────────────────────────────────────
+
   mkFlake =
     {
-      # Flake inputs (must contain nixpkgs)
       inputs,
-      # The flake self-reference (for fixpoint)
       self ? inputs.self or null,
-      # Source root (resolved from prefix)
       src ? (if self != null then self else throw "red-tape: either `self` or `src` must be provided"),
-      # Optional prefix within source
       prefix ? null,
-      # Systems to build for
       systems ? [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ],
-      # Nixpkgs configuration
       nixpkgs ? {},
-      # Extra adios modules to include
       extraModules ? {},
-      # Third-party module config (maps to adios tree options)
       config ? {},
     }:
     let
@@ -155,10 +150,11 @@ let
         else
           src;
 
-      # Discover filesystem layout (pure, evaluated once)
       discovered = discover resolvedSrc;
+      configOptions = mkConfigOptions config;
 
-      rootDef = mkRootDef { inherit extraModules; };
+      modules = mkModules { inherit discovered extraModules; };
+      loaded = adios { name = "red-tape"; inherit modules; };
 
       nixpkgsFor = system:
         let
@@ -174,56 +170,28 @@ let
             inherit overlays;
           };
 
-      configOptions = mkConfigOptions config;
-
-      mkOptions = system:
+      mkOpts = system:
         let
           perSystem = mkPerSystem flakeInputs self system;
           extraScope = mkExtraScope { inherit flakeInputs self perSystem; };
         in
-        {
-          "/nixpkgs" = {
-            inherit system;
-            pkgs = nixpkgsFor system;
-          };
-          "/packages" = {
-            discovered = discovered.packages;
-            inherit extraScope;
-          };
-          "/devshells" = {
-            discovered = discovered.devshells;
-            inherit extraScope;
-          };
-          "/formatter" = {
-            formatterPath = discovered.formatter;
-            inherit extraScope;
-          };
-          "/checks" = {
-            discovered = discovered.checks;
-            inherit extraScope;
-          };
-        } // configOptions;
+        mkOptions {
+          inherit discovered configOptions extraScope;
+        } system {
+          inherit system;
+          pkgs = nixpkgsFor system;
+        };
 
-      # Load the tree once
-      loaded = adios rootDef;
-
-      # First system: full evaluation
       firstSystem = head systems;
-      firstEvaled = loaded.eval { options = mkOptions firstSystem; };
-      firstResult = collectResults firstEvaled firstSystem discovered;
+      firstEvaled = loaded.eval { options = mkOpts firstSystem; };
+      firstResult = collectResults { evaled = firstEvaled; system = firstSystem; inherit discovered; };
 
-      # Subsequent systems: override with new options (adios memoizes unchanged modules)
-      remainingSystems = tail systems;
       otherResults = listToAttrs (map (sys:
-        let
-          overridden = firstEvaled.override { options = mkOptions sys; };
-        in
-        { name = sys; value = collectResults overridden sys discovered; }
-      ) remainingSystems);
+        let overridden = firstEvaled.override { options = mkOpts sys; };
+        in { name = sys; value = collectResults { evaled = overridden; system = sys; inherit discovered; }; }
+      ) (tail systems));
 
       allPerSystem = { ${firstSystem} = firstResult; } // otherResults;
-
-      # Transpose to flake output shape
       transposed = transpose allPerSystem;
 
       # System-agnostic outputs
@@ -252,67 +220,40 @@ let
     in
     transposed // agnosticOutputs;
 
-  # Traditional (non-flake) entry point
+  # ── Traditional entry point ─────────────────────────────────────────
+
   eval =
     {
-      # Nixpkgs instance
       pkgs,
-      # Source root
       src,
-      # Extra adios modules
       extraModules ? {},
-      # Third-party module config
       config ? {},
-      # Extra scope for callPackage
       extraScope ? {},
     }:
     let
       system = pkgs.system or pkgs.stdenv.hostPlatform.system;
-
       discovered = discover src;
-
-      rootDef = mkRootDef { inherit extraModules; };
-
       configOptions = mkConfigOptions config;
 
-      loaded = adios rootDef;
-      evaled = loaded.eval {
-        options = {
-          "/nixpkgs" = { inherit system pkgs; };
-          "/packages" = {
-            discovered = discovered.packages;
-            inherit extraScope;
-          };
-          "/devshells" = {
-            discovered = discovered.devshells;
-            inherit extraScope;
-          };
-          "/formatter" = {
-            formatterPath = discovered.formatter;
-            inherit extraScope;
-          };
-          "/checks" = {
-            discovered = discovered.checks;
-            inherit extraScope;
-          };
-        } // configOptions;
-      };
+      modules = mkModules { inherit discovered extraModules; };
+      loaded = adios { name = "red-tape"; inherit modules; };
 
-      result = collectResults evaled system discovered;
+      opts = mkOptions {
+        inherit discovered configOptions extraScope;
+      } system { inherit system pkgs; };
+
+      evaled = loaded.eval { options = opts; };
+      result = collectResults { inherit evaled system discovered; };
 
       templatesOutput = buildTemplates discovered.templates;
 
       libOutput =
         if discovered.lib != null then
-          import discovered.lib {
-            flake = null;
-            inputs = {};
-          }
+          import discovered.lib { flake = null; inputs = {}; }
         else
           {};
     in
     result // {
-      # Convenience alias
       shell = result.devShells.default or null;
     }
     // (if templatesOutput != {} then { templates = templatesOutput; } else {})
