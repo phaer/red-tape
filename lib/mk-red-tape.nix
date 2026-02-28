@@ -209,36 +209,11 @@ let
       firstEvaled = loaded.eval { options = mkOptions firstSystem; };
       firstResult = collectResults firstEvaled firstSystem discovered;
 
-      # Subsequent systems: override /nixpkgs + per-system options
+      # Subsequent systems: override with new options (adios memoizes unchanged modules)
       remainingSystems = tail systems;
       otherResults = listToAttrs (map (sys:
         let
-          perSystem = mkPerSystem flakeInputs self sys;
-          extraScope = mkExtraScope { inherit flakeInputs self perSystem; };
-          overridden = firstEvaled.override {
-            options = {
-              "/nixpkgs" = {
-                system = sys;
-                pkgs = nixpkgsFor sys;
-              };
-              "/packages" = {
-                discovered = discovered.packages;
-                inherit extraScope;
-              };
-              "/devshells" = {
-                discovered = discovered.devshells;
-                inherit extraScope;
-              };
-              "/formatter" = {
-                formatterPath = discovered.formatter;
-                inherit extraScope;
-              };
-              "/checks" = {
-                discovered = discovered.checks;
-                inherit extraScope;
-              };
-            };
-          };
+          overridden = firstEvaled.override { options = mkOptions sys; };
         in
         { name = sys; value = collectResults overridden sys discovered; }
       ) remainingSystems);
