@@ -1,49 +1,15 @@
-# /checks — Per-system check builder
+# /checks — Per-system user-defined checks
 #
-# Only handles user-defined checks from the checks/ directory.
-# Auto-checks from packages and devshells are assembled by the entry point.
+# Only handles checks from the checks/ directory.
+# Auto-checks from packages/devshells are assembled by the entry point.
 
-{ types, ... }:
 let
-  inherit (builtins) mapAttrs;
-
-  callFile = import ../lib/call-file.nix;
   filterPlatforms = import ../lib/filter-platforms.nix;
+  mkModule = import ../lib/mk-per-system-module.nix;
 in
-{
+mkModule {
   name = "checks";
-
-  inputs = {
-    nixpkgs = { path = "/nixpkgs"; };
+  postProcess = { system, built, ... }: {
+    checks = filterPlatforms system built;
   };
-
-  options = {
-    discovered = {
-      type = types.attrs;
-      default = {};
-    };
-    extraScope = {
-      type = types.attrs;
-      default = {};
-    };
-  };
-
-  impl = { inputs, options, ... }:
-    let
-      system = inputs.nixpkgs.system;
-
-      scope = {
-        pkgs = inputs.nixpkgs.pkgs;
-        inherit system;
-        lib = inputs.nixpkgs.pkgs.lib;
-      } // options.extraScope;
-
-      userChecks = filterPlatforms system (mapAttrs (pname: entry:
-        let path = if entry.type == "directory" then entry.path + "/default.nix" else entry.path;
-        in callFile scope path { inherit pname; }
-      ) options.discovered);
-    in
-    {
-      checks = userChecks;
-    };
 }
