@@ -68,12 +68,12 @@ always present, falling back to `nixfmt-tree` when no `formatter.nix` exists.
 | `devshell.nix` / `devshells/` | `devShells.<name>` | same |
 | `formatter.nix` | `formatter` | Fallback: `nixfmt-tree` |
 | `checks/` | `checks.<name>` | same |
-| `overlay.nix` / `overlays/` | `overlays.<name>` | Must return a nixpkgs overlay |
 
 ### System-Agnostic Outputs
 
 | Convention | Output | Notes |
 |-----------|--------|-------|
+| `overlay.nix` / `overlays/` | `overlays.<name>` | Must return a nixpkgs overlay |
 | `hosts/*/configuration.nix` | `nixosConfigurations.*` | specialArgs: `{ flake, inputs, hostName }` |
 | `hosts/*/darwin-configuration.nix` | `darwinConfigurations.*` | Requires `inputs.nix-darwin` |
 | `hosts/*/default.nix` | classified by returned `class` | Escape hatch |
@@ -85,12 +85,13 @@ always present, falling back to `nixfmt-tree` when no `formatter.nix` exists.
 
 ### Overlays
 
-Overlay files receive the standard callPackage scope and must return a
-nixpkgs overlay function (`final: prev: { ... }`):
+Overlay files must return a nixpkgs overlay function (`final: prev: { ... }`).
+They can accept `{ lib, flake, inputs, ... }` but **not** `pkgs` or `system`
+— overlays receive their own pkgs via `final`/`prev` at application time:
 
 ```nix
 # overlays/my-tools.nix
-{ lib, ... }:
+{ ... }:
 final: prev: {
   my-tool = final.callPackage ./my-tool.nix {};
 }
@@ -108,7 +109,7 @@ User-defined checks in `checks/` take precedence over auto-generated ones.
 
 ## CallPackage Scope
 
-Every `.nix` file under `packages/`, `devshells/`, `checks/`, `overlays/`,
+Every `.nix` file under `packages/`, `devshells/`, `checks/`,
 and `formatter.nix` is called with arguments matched from:
 
 | Arg | Value |
