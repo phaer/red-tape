@@ -3,6 +3,7 @@
 Convention-based Nix project builder on top of [adios](https://github.com/adisbladis/adios).
 
 Drop `.nix` files in the right directories, get flake outputs with zero boilerplate.
+~500 lines in a single `default.nix`.
 
 ## Quick Start
 
@@ -53,10 +54,10 @@ your-project/
 ## How It Works
 
 1. **Discover** — Scan the source tree for files matching conventions
-2. **Evaluate** — Per-system outputs go through adios modules for memoization
-3. **Assemble** — Auto-checks from packages and devshells, system-agnostic outputs merged
+2. **Evaluate** — Outputs go through adios modules for memoization
+3. **Assemble** — Auto-checks from packages/devshells, transpose per-system, merge agnostic
 
-Modules are conditional — only included in the adios tree when the
+All modules are conditional — only included in the adios tree when the
 corresponding directory or file exists. The formatter is the exception:
 always present, falling back to `nixfmt-tree` when no `formatter.nix` exists.
 
@@ -69,11 +70,11 @@ always present, falling back to `nixfmt-tree` when no `formatter.nix` exists.
 | `formatter.nix` | `formatter` | Fallback: `nixfmt-tree` |
 | `checks/` | `checks.<name>` | same |
 
-### System-Agnostic Outputs
+### System-Agnostic Outputs (memoized, evaluated once)
 
 | Convention | Output | Notes |
 |-----------|--------|-------|
-| `overlay.nix` / `overlays/` | `overlays.<name>` | Must return a nixpkgs overlay |
+| `overlay.nix` / `overlays/` | `overlays.<name>` | Must return `final: prev: { ... }` |
 | `hosts/*/configuration.nix` | `nixosConfigurations.*` | specialArgs: `{ flake, inputs, hostName }` |
 | `hosts/*/darwin-configuration.nix` | `darwinConfigurations.*` | Requires `inputs.nix-darwin` |
 | `hosts/*/default.nix` | classified by returned `class` | Escape hatch |
@@ -180,23 +181,30 @@ Returns `{ packages, devShells, formatter, checks, overlays, shell, ... }`.
 
 ## Architecture
 
-Built on [adios](https://github.com/adisbladis/adios) for evaluation memoization.
-Per-system adios modules (all conditional on discovery):
+Everything lives in a single `default.nix` (~500 sloc). Built on
+[adios](https://github.com/adisbladis/adios) for evaluation memoization.
+The flake entry point (`flake.nix`) just does `import ./. {}`.
+
+Adios modules (all conditional on discovery):
 
 ```
-/nixpkgs    — data-only: { system, pkgs }
-/packages   — builds packages from discovered paths
-/devshells  — builds devshells from discovered paths
-/formatter  — selects formatter (fallback nixfmt-tree)
-/checks     — builds user-defined checks
-/overlays   — builds nixpkgs overlays
+Per-system (re-evaluated per system override):
+  /nixpkgs    — data-only: { system, pkgs }
+  /packages   — builds packages from discovered paths
+  /devshells  — builds devshells from discovered paths
+  /formatter  — selects formatter (fallback nixfmt-tree)
+  /checks     — builds user-defined checks
+
+System-agnostic (evaluated once, memoized across overrides):
+  /hosts          — nixosConfigurations, darwinConfigurations
+  /overlays       — nixpkgs overlay functions
+  /modules-export — nixosModules, darwinModules, homeModules
 ```
 
 Discovery is a **plain function** (not an adios module) — its results are
-passed as options. System-agnostic outputs (hosts, modules, templates, lib)
-are assembled outside the adios tree.
+passed as options. Templates and lib export are also plain functions.
 
-For multi-system evaluation, the first system does a full `eval`, subsequent
+For multi-system evaluation, the first system does a full eval, subsequent
 systems use `override` to change only `/nixpkgs`, which lets adios skip
 re-evaluation of modules that don't depend on system-specific options.
 
