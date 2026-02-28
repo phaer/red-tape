@@ -78,4 +78,22 @@ in
     }).lib.greet "nix";
     expected = "Hello, nix!";
   };
+
+  # eval exports overlays
+  testEvalOverlays = {
+    expr = builtins.attrNames (redTape.eval {
+      pkgs = mockPkgs;
+      src = fixtures + "/simple";
+    }).overlays;
+    expected = [ "my-overlay" ];
+  };
+
+  # no overlays when none discovered
+  testEvalNoOverlays = {
+    expr = (redTape.eval {
+      pkgs = mockPkgs;
+      src = fixtures + "/minimal";
+    }) ? overlays;
+    expected = false;
+  };
 }

@@ -49,6 +49,7 @@ let
     // (if discovered.packages != {} then { packages  = callMod ../modules/packages.nix; } else {})
     // (if discovered.devshells != {} then { devshells = callMod ../modules/devshells.nix; } else {})
     // (if discovered.checks != {} then { checks = callMod ../modules/checks.nix; } else {})
+    // (if discovered.overlays != {} then { overlays = callMod ../modules/overlays.nix; } else {})
     // extraModules;
 
   mkExtraScope = { flakeInputs ? {}, self ? null, perSystem ? {} }:
@@ -71,6 +72,9 @@ let
     // (if modules ? checks then {
       "/checks" = { discovered = discovered.checks; inherit extraScope; };
     } else {})
+    // (if modules ? overlays then {
+      "/overlays" = { discovered = discovered.overlays; inherit extraScope; };
+    } else {})
     // configOptions;
 
   # Collect results — only calls modules that are in the tree.
@@ -82,7 +86,8 @@ let
       pkgResult = if has "packages"  then mods.packages {}  else { filteredPackages = {}; };
       devResult = if has "devshells" then mods.devshells {}  else { devShells = {}; };
       fmtResult = mods.formatter {};
-      chkResult = if has "checks"    then mods.checks {}    else { checks = {}; };
+      chkResult = if has "checks"    then mods.checks {}     else { checks = {}; };
+      ovlResult = if has "overlays"  then mods.overlays {}   else { overlays = {}; };
 
       # Auto-checks from packages
       packageChecks =
@@ -101,12 +106,12 @@ let
       # Auto-checks from devshells
       devshellChecks = withPrefix "devshell-" devResult.devShells;
     in
-    {
-      packages = pkgResult.filteredPackages;
+    { packages = pkgResult.filteredPackages;
       devShells = devResult.devShells;
       formatter = fmtResult.formatter;
       checks = packageChecks // devshellChecks // chkResult.checks;
-    };
+    }
+    // (if ovlResult.overlays != {} then { overlays = ovlResult.overlays; } else {});
 
   # Import lib, handling both function and plain attrset forms
   importLib = { libPath, flake ? null, inputs ? {} }:

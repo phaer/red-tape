@@ -77,5 +77,9 @@ src: {
 
   modules = scanModuleTypes (src + "/modules");
 
+  overlays =
+    scanDir (src + "/overlays")
+    // optionalFile (src + "/overlay.nix") "default";
+
   templates = scanTemplates (src + "/templates");
 }
