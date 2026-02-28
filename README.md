@@ -12,7 +12,7 @@ Drop `.nix` files in the right directories, get flake outputs with zero boilerpl
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.red-tape.url = "github:you/red-tape";
 
-  outputs = inputs: inputs.red-tape.mkFlake { inherit inputs; };
+  outputs = inputs: inputs.red-tape.lib { inherit inputs; };
 }
 ```
 
@@ -56,9 +56,9 @@ your-project/
 2. **Evaluate** — Per-system outputs go through adios modules for memoization
 3. **Assemble** — Auto-checks from packages and devshells, system-agnostic outputs merged
 
-All modules are conditional — only included in the adios tree when the
-corresponding directory or file exists. An empty project produces an empty
-tree.
+Modules are conditional — only included in the adios tree when the
+corresponding directory or file exists. The formatter is the exception:
+always present, falling back to `nixfmt-tree` when no `formatter.nix` exists.
 
 ### Per-System Outputs (transposed across systems)
 
@@ -127,7 +127,7 @@ and `formatter.nix` is called with arguments matched from:
 inputs into a flat namespace:
 
 ```nix
-# In package.nix:
+# In devshell.nix:
 { pkgs, perSystem, ... }:
 pkgs.mkShell {
   packages = [ perSystem.some-input.some-package ];
@@ -137,7 +137,7 @@ pkgs.mkShell {
 ## Configuration
 
 ```nix
-inputs.red-tape.mkFlake {
+inputs.red-tape.lib {
   inherit inputs;
 
   # Override source root (for monorepos)
