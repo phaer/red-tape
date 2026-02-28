@@ -1,8 +1,8 @@
 # Tests for template export
 let
-  buildTemplates = import ../lib/build-templates.nix;
-  discover = import ../modules/discover.nix;
-  fixtures = ../tests/fixtures;
+  prelude = import ./prelude.nix;
+  inherit (prelude) _internal fixtures;
+  inherit (_internal) discover buildTemplates;
 in
 {
   testTemplateNames = {

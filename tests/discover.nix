@@ -1,7 +1,8 @@
-# Tests for the discover function (modules/discover.nix)
+# Tests for the discover function
 let
-  fixtures = ../tests/fixtures;
-  discover = import ../modules/discover.nix;
+  prelude = import ./prelude.nix;
+  inherit (prelude) _internal fixtures;
+  inherit (_internal) discover;
 in
 {
   # --- Packages ---

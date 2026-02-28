@@ -1,6 +1,7 @@
-# Tests for lib/transpose.nix
+# Tests for transpose
 let
-  transpose = import ../lib/transpose.nix;
+  prelude = import ./prelude.nix;
+  inherit (prelude._internal) transpose;
 in
 {
   # Single system, single category

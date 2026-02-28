@@ -1,7 +1,7 @@
 # Edge case tests
 let
-  scanDir = import ../lib/scan-dir.nix;
-  filterPlatforms = import ../lib/filter-platforms.nix;
+  prelude = import ./prelude.nix;
+  inherit (prelude._internal) scanDir filterPlatforms buildTemplates;
 in
 {
   # meta.platforms filtering removes packages for wrong system
@@ -38,8 +38,6 @@ in
   testTemplateDescriptionFallback = {
     expr =
       let
-        buildTemplates = import ../lib/build-templates.nix;
-        # Template without a flake.nix description
         result = buildTemplates {
           nodesc = { path = ../tests/fixtures/empty; };
         };

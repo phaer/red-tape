@@ -1,7 +1,8 @@
-# Tests for lib/scan-dir.nix
+# Tests for scanDir
 let
-  scanDir = import ../lib/scan-dir.nix;
-  fixtures = ../tests/fixtures;
+  prelude = import ./prelude.nix;
+  inherit (prelude) _internal fixtures;
+  inherit (_internal) scanDir;
 in
 {
   # Discovers .nix files and directories with default.nix

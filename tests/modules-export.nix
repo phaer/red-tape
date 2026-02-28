@@ -1,26 +1,20 @@
 # Tests for module export via adios module
 let
   prelude = import ./prelude.nix;
-  inherit (prelude) adios fixtures;
-
-  discover = import ../modules/discover.nix;
-  callMod = path: import path adios;
+  inherit (prelude) adios _internal fixtures;
+  inherit (_internal) discover;
 
   evalModulesExport = discoveredModules:
     let
       loaded = adios {
         name = "modexp-test";
-        modules = {
-          modules-export = callMod ../modules/modules-export.nix;
-        };
+        modules.modules-export = _internal.modules.modModulesExport;
       };
       evaled = loaded {
-        options = {
-          "/modules-export" = {
-            discovered = discoveredModules;
-            flakeInputs = {};
-            self = null;
-          };
+        options."/modules-export" = {
+          discovered = discoveredModules;
+          flakeInputs = {};
+          self = null;
         };
       };
     in

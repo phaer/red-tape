@@ -1,35 +1,27 @@
 # Tests for host building via adios module
 let
   prelude = import ./prelude.nix;
-  inherit (prelude) adios fixtures;
-
-  discover = import ../modules/discover.nix;
-  callMod = path: import path adios;
+  inherit (prelude) adios _internal fixtures;
+  inherit (_internal) discover;
 
   fullHosts = (discover (fixtures + "/full")).hosts;
 
-  # Evaluate the hosts module directly
   evalHosts = discoveredHosts:
     let
       loaded = adios {
         name = "hosts-test";
-        modules = {
-          hosts = callMod ../modules/hosts.nix;
-        };
+        modules.hosts = _internal.modules.modHosts;
       };
       evaled = loaded {
-        options = {
-          "/hosts" = {
-            discovered = discoveredHosts;
-            flakeInputs = {};
-            self = null;
-          };
+        options."/hosts" = {
+          discovered = discoveredHosts;
+          flakeInputs = {};
+          self = null;
         };
       };
     in
     evaled.modules.hosts {};
 
-  # Both custom and mymac use the escape hatch
   testResult = evalHosts {
     inherit (fullHosts) custom mymac;
   };

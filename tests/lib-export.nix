@@ -1,7 +1,8 @@
 # Tests for lib export
 let
-  discover = import ../modules/discover.nix;
-  fixtures = ../tests/fixtures;
+  prelude = import ./prelude.nix;
+  inherit (prelude) _internal fixtures;
+  inherit (_internal) discover;
 in
 {
   testLibPresent = {

@@ -1,31 +1,25 @@
 # Integration tests — full tree evaluation with mock pkgs
 let
   prelude = import ./prelude.nix;
-  inherit (prelude) adios mockPkgs sys fixtures;
+  inherit (prelude) adios mockPkgs sys fixtures _internal;
+  inherit (_internal) discover filterPlatforms;
+  mods = _internal.modules;
 
-  discover = import ../modules/discover.nix;
-  filterPlatforms = import ../lib/filter-platforms.nix;
-
-  callMod = path: import path adios;
-
-  # Build modules conditionally, same as mk-red-tape.nix
   mkModules = discovered:
-    { nixpkgs   = callMod ../modules/nixpkgs.nix;
-      formatter = callMod ../modules/formatter.nix;
-    }
-    // (if discovered.packages != {} then { packages  = callMod ../modules/packages.nix; } else {})
-    // (if discovered.devshells != {} then { devshells = callMod ../modules/devshells.nix; } else {})
-    // (if discovered.checks != {} then { checks = callMod ../modules/checks.nix; } else {})
-    // (if discovered.overlays != {} then { overlays = callMod ../modules/overlays.nix; } else {});
+    { nixpkgs = mods.modNixpkgs; formatter = mods.modFormatter; }
+    // (if discovered.packages  != {} then { packages  = mods.modPackages; }  else {})
+    // (if discovered.devshells != {} then { devshells = mods.modDevshells; } else {})
+    // (if discovered.checks    != {} then { checks    = mods.modChecks; }    else {})
+    // (if discovered.overlays  != {} then { overlays  = mods.modOverlays; }  else {});
 
   mkOptions = discovered:
-    { "/nixpkgs" = { system = sys; pkgs = mockPkgs; };
+    { "/nixpkgs"   = { system = sys; pkgs = mockPkgs; };
       "/formatter" = { formatterPath = discovered.formatter; };
     }
-    // (if discovered.packages != {} then { "/packages" = { discovered = discovered.packages; }; } else {})
+    // (if discovered.packages  != {} then { "/packages"  = { discovered = discovered.packages; }; }  else {})
     // (if discovered.devshells != {} then { "/devshells" = { discovered = discovered.devshells; }; } else {})
-    // (if discovered.checks != {} then { "/checks" = { discovered = discovered.checks; }; } else {})
-    // (if discovered.overlays != {} then { "/overlays" = { discovered = discovered.overlays; }; } else {});
+    // (if discovered.checks    != {} then { "/checks"    = { discovered = discovered.checks; }; }    else {})
+    // (if discovered.overlays  != {} then { "/overlays"  = { discovered = discovered.overlays; }; }  else {});
 
   evalFixture = src:
     let
@@ -33,13 +27,13 @@ let
       modules = mkModules discovered;
       loaded = adios { name = "test"; inherit modules; };
       evaled = loaded { options = mkOptions discovered; };
-      mods = evaled.modules;
+      ms = evaled.modules;
 
-      pkgResult = if mods ? packages  then mods.packages {}  else { filteredPackages = {}; };
-      devResult = if mods ? devshells then mods.devshells {}  else { devShells = {}; };
-      fmtResult = mods.formatter {};
-      chkResult = if mods ? checks    then mods.checks {}     else { checks = {}; };
-      ovlResult = if mods ? overlays  then mods.overlays {}   else { overlays = {}; };
+      pkgResult = if ms ? packages  then ms.packages {}  else { filteredPackages = {}; };
+      devResult = if ms ? devshells then ms.devshells {}  else { devShells = {}; };
+      fmtResult = ms.formatter {};
+      chkResult = if ms ? checks    then ms.checks {}     else { checks = {}; };
+      ovlResult = if ms ? overlays  then ms.overlays {}   else { overlays = {}; };
     in
     {
       packages = pkgResult.filteredPackages;
@@ -47,7 +41,6 @@ let
       formatter = fmtResult.formatter;
       checks = chkResult.checks;
       overlays = ovlResult.overlays;
-      # Expose which modules are in the tree
       moduleNames = builtins.sort builtins.lessThan (builtins.attrNames modules);
     };
 
@@ -59,15 +52,15 @@ in
     expected = [ "goodbye" "hello" ];
   };
 
-  testSimpleDevshellNames = {
+  testPackageType = {
+    expr = (evalFixture (fixtures + "/simple")).packages.hello.type;
+    expected = "derivation";
+  };
+
+  testDevshellNames = {
     expr = builtins.sort builtins.lessThan
       (builtins.attrNames (evalFixture (fixtures + "/simple")).devShells);
     expected = [ "backend" "default" ];
-  };
-
-  testSimpleUserChecks = {
-    expr = builtins.attrNames (evalFixture (fixtures + "/simple")).checks;
-    expected = [ "mycheck" ];
   };
 
   testSimpleFormatter = {
@@ -75,57 +68,48 @@ in
     expected = true;
   };
 
-  testMinimalPackage = {
-    expr = builtins.attrNames (evalFixture (fixtures + "/minimal")).packages;
-    expected = [ "default" ];
+  testFormatterFallback = {
+    expr = (evalFixture (fixtures + "/minimal")).formatter.name;
+    expected = "nixfmt-tree";
   };
 
-  # Empty fixture: only nixpkgs + formatter modules in tree
-  testEmptyOutputs = {
-    expr =
-      let result = evalFixture (fixtures + "/empty");
-      in {
-        packages = result.packages;
-        devShells = result.devShells;
-        checks = result.checks;
-      };
-    expected = {
-      packages = {};
-      devShells = {};
-      checks = {};
-    };
+  testCheckNames = {
+    expr = builtins.sort builtins.lessThan
+      (builtins.attrNames (evalFixture (fixtures + "/simple")).checks);
+    expected = [ "mycheck" ];
   };
 
-  testEmptyModulesMinimal = {
-    expr = (evalFixture (fixtures + "/empty")).moduleNames;
-    expected = [ "formatter" "nixpkgs" ];
-  };
-
-  # Simple fixture has all modules
-  testSimpleModulesPresent = {
-    expr = (evalFixture (fixtures + "/simple")).moduleNames;
-    expected = [ "checks" "devshells" "formatter" "nixpkgs" "overlays" "packages" ];
-  };
-
-  # Minimal fixture only has packages + formatter
-  testMinimalModulesPresent = {
+  # Conditional modules: minimal fixture has only nixpkgs + formatter
+  testMinimalModules = {
     expr = (evalFixture (fixtures + "/minimal")).moduleNames;
     expected = [ "formatter" "nixpkgs" "packages" ];
   };
 
-  # Overlays are discovered and built
-  testSimpleOverlays = {
+  # Simple fixture has packages, devshells, checks, overlays
+  testSimpleModules = {
+    expr = (evalFixture (fixtures + "/simple")).moduleNames;
+    expected = [ "checks" "devshells" "formatter" "nixpkgs" "overlays" "packages" ];
+  };
+
+  # Empty fixture has only nixpkgs + formatter
+  testEmptyModules = {
+    expr = (evalFixture (fixtures + "/empty")).moduleNames;
+    expected = [ "formatter" "nixpkgs" ];
+  };
+
+  # Overlay names from simple fixture
+  testSimpleOverlayNames = {
     expr = builtins.attrNames (evalFixture (fixtures + "/simple")).overlays;
     expected = [ "my-overlay" ];
   };
 
-  # Overlay returns a function (final: prev: ...)
+  # Overlay is a function (final: prev: { ... })
   testOverlayIsFunction = {
     expr = builtins.isFunction (evalFixture (fixtures + "/simple")).overlays.my-overlay;
     expected = true;
   };
 
-  # No overlays for minimal fixture
+  # No overlays in minimal
   testMinimalNoOverlays = {
     expr = (evalFixture (fixtures + "/minimal")).overlays;
     expected = {};
