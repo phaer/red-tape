@@ -7,7 +7,7 @@
       imported = import ./. {};
     in
     {
-      # Make red-tape callable: inputs.red-tape { inherit inputs; }
+      # Make red-tape callable: inputs.red-tape.lib { inherit inputs; }
       lib = imported // {
         __functor = _: args:
           imported.mkFlake (args // {
