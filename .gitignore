@@ -4,3 +4,4 @@ result-*
 _adios/
 _adios-flake/
 _blueprint/
+tests/consumer/flake.lock
