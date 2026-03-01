@@ -5,3 +5,5 @@ _adios/
 _adios-flake/
 _blueprint/
 tests/consumer/flake.lock
+tests/bench-blueprint/flake.lock
+tests/bench-red-tape/flake.lock
