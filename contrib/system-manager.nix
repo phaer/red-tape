@@ -31,6 +31,17 @@ in
   optionsFn = { discovered, flakeInputs, self, ... }:
     { discovered = discovered.system-manager; inherit flakeInputs self; };
 
+  autoChecks = { result, system }:
+    listToAttrs (filter (x: x != null) (map (name:
+      let
+        cfg = result.systemConfigs.${name};
+        hostSystem = cfg.config.nixpkgs.hostPlatform.system or null;
+      in
+      if hostSystem == system
+      then { name = "system-manager-${name}"; value = cfg.config.system.build.toplevel; }
+      else null
+    ) (attrNames (result.systemConfigs or {}))));
+
   options = {
     discovered  = { type = types.attrs; default = {}; };
     flakeInputs = { type = types.attrs; default = {}; };

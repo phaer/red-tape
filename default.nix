@@ -314,6 +314,21 @@ let
     discover = src: scanHosts (src + "/hosts") coreHostTypes;
     optionsFn = { discovered, flakeInputs, self, ... }:
       { discovered = discovered.hosts; inherit flakeInputs self; };
+    autoChecks = { result, system }:
+      let
+        mkHostChecks = prefix: hosts:
+          listToAttrs (filter (x: x != null) (map (name:
+            let
+              host = hosts.${name};
+              hostSystem = host.config.nixpkgs.hostPlatform.system or null;
+            in
+            if hostSystem == system
+            then { name = "${prefix}-${name}"; value = host.config.system.build.toplevel; }
+            else null
+          ) (attrNames hosts)));
+      in
+      mkHostChecks "nixos" (result.nixosConfigurations or {})
+      // mkHostChecks "darwin" (result.darwinConfigurations or {});
     options = {
       discovered  = { type = types.attrs; default = {}; };
       flakeInputs = { type = types.attrs; default = {}; };
@@ -514,11 +529,23 @@ let
           }) (attrNames tests)
         ) (attrNames pkgResult.filteredPackages));
 
+      # Auto-checks from any descriptor that declares autoChecks.
+      # Each descriptor's autoChecks receives its impl result and the current
+      # system, returning { name = drv; }.
+      descriptorAutoChecks =
+        foldl' (acc: desc:
+          if desc ? autoChecks && has desc.name
+          then let result = mods.${desc.name} {};
+               in acc // desc.autoChecks { inherit result system; }
+          else acc
+        ) {} (attrValues descriptors);
+
       coreResult = {
         packages  = pkgResult.filteredPackages;
         devShells = devResult.devShells;
         formatter = fmtResult.formatter;
-        checks    = packageChecks // withPrefix "devshell-" devResult.devShells // chkResult.checks;
+        checks    = packageChecks // withPrefix "devshell-" devResult.devShells
+                    // descriptorAutoChecks // chkResult.checks;
       };
 
       # Extra per-system descriptors (not in core): just merge their results

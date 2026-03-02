@@ -329,11 +329,19 @@ The `{ flake, inputs }` wrapper is optional — a plain attrset works too.
 
 ## Auto-Checks
 
-Packages and devshells automatically become checks:
+Packages, devshells, and host configurations automatically become checks:
 
 - `packages.foo` → `checks.pkgs-foo`
 - `packages.foo.passthru.tests.bar` → `checks.pkgs-foo-bar`
 - `devShells.default` → `checks.devshell-default`
+- `nixosConfigurations.myhost` → `checks.nixos-myhost` (matched by host platform)
+- `darwinConfigurations.mymac` → `checks.darwin-mymac`
+
+Host checks build `system.build.toplevel` and are placed under the system
+matching the host's `nixpkgs.hostPlatform`.
+
+Custom modules can declare `autoChecks` in their descriptor to wire their
+outputs as checks too (see [Writing Custom Modules](#writing-custom-modules)).
 
 User-defined checks in `checks/` take precedence over auto-generated ones.
 
@@ -490,7 +498,6 @@ a single line in `flake.nix`.
 |-|-----------|----------|
 | **Overlays** | ✗ | ✓ (`overlay.nix` / `overlays/`) |
 | **Formatter fallback** | Requires `formatter.nix` | Falls back to `nixfmt-tree` |
-| **Host auto-checks** | ✓ (builds closures as checks) | ✗ (too expensive for `nix flake check`) |
 | **TOML devshells** | ✓ | ✗ |
 | **Home-manager users under hosts** | ✓ | ✗ |
 | **System-manager/RPi hosts** | ✓ | ✗ |
@@ -534,6 +541,7 @@ red-tape is built on adios modules. Add your own via `extraModules`:
 | `discover` | no | `src -> value \| null` — file scanning. Absent = always active |
 | `optionsFn` | no | `ctx -> attrset` — wires `discovered` into adios options |
 | `perSystem` | no | `bool`, default `false`. `true` = per-system, transposed |
+| `autoChecks` | no | `{ result, system } -> attrset` — derive checks from this module's output |
 | `options` | yes | adios typed option declarations |
 | `impl` | yes | `{ options, inputs, ... } -> attrset` — builds flake outputs |
 
