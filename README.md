@@ -1,9 +1,16 @@
 # red-tape
 
-Convention-based flake output builder on top of
-[adios-flake](https://github.com/Mic92/adios-flake).
-Drop `.nix` files in the right directories, get flake outputs with zero
-boilerplate. ~300 lines of library code.
+> ⚠️ **This is slop.** Written by an LLM, guided by a human(?) who kept
+> saying "make it more elegant" until something stuck. Expect overconfident
+> documentation, undertested edge cases, and questionable design decisions.
+> Use at your own risk — or better yet, use
+> [blueprint](https://github.com/numtide/blueprint).
+
+A clone of [blueprint](https://github.com/numtide/blueprint) rebuilt on
+[adios-flake](https://github.com/Mic92/adios-flake). Same directory
+conventions, same idea — drop `.nix` files in the right place, get flake
+outputs — but with adios memoization, overlay support, and extensibility
+via adios-flake modules. ~300 lines of library code.
 
 ## Quick Start
 
