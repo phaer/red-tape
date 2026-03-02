@@ -44,6 +44,31 @@ in
     expected = true;
   };
 
+  # Publisher args are injected at export time
+  testInjectedModuleReceivesPublisherArgs = {
+    expr =
+      let
+        fakeSelf = { outPath = "/my/flake"; };
+        fakeInputs = { nixpkgs = "fake-nixpkgs"; };
+        result = buildModules {
+          discovered = (discover.discoverAll (fixtures + "/full")).modules;
+          flakeInputs = fakeInputs;
+          self = fakeSelf;
+        };
+        # Call the wrapped module to get its body
+        modBody = result.nixosModules.injected {};
+      in {
+        hasFlake = modBody._publisherFlake == fakeSelf;
+        hasInputs = modBody._publisherInputs ? nixpkgs;
+        hasSelf = modBody._publisherInputs ? self;
+      };
+    expected = {
+      hasFlake = true;
+      hasInputs = true;
+      hasSelf = true;
+    };
+  };
+
   testEmptyModules = {
     expr = empty;
     expected = {};

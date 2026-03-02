@@ -1,7 +1,8 @@
 # NixOS module that takes publisher args
 { flake, inputs }:
-# Returns the wrapped module
+# Returns the wrapped module — closes over publisher's flake/inputs
 { ... }:
 {
-  # Module body
+  _publisherFlake = flake;
+  _publisherInputs = inputs;
 }
