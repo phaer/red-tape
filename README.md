@@ -487,7 +487,7 @@ a single line in `flake.nix`.
 | **Home-manager users under hosts** | ✓ | ✗ |
 | **System-manager/RPi hosts** | ✓ | ✗ |
 | **Memoization** | None (full eval per system) | adios (system-agnostic work evaluated once) |
-| **Flake inputs** | Requires `nixpkgs` + `systems` | None (npins internally) |
+| **Flake inputs** | Requires `nixpkgs` | None (npins internally) |
 
 **Use red-tape** for adios memoization, overlays, minimal formatter fallback.
 **Use blueprint** for home-manager user wiring, TOML devshells, larger community.
