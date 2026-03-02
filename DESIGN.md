@@ -133,9 +133,16 @@ modules. Templates and lib are plain functions.
 **D7. Overlays are system-agnostic** — they're functions (`final: prev: {}`),
 not derivations. No `/nixpkgs` dependency, evaluated once.
 
-**D8. Single file** — everything lives in `default.nix` (~500 sloc).
+**D8. Single file** — everything lives in `default.nix` (~660 sloc).
 `flake.nix` is just `import ./. {}` + a `lib` wrapper. No `lib/` or
 `modules/` directories. Adios module definitions are inline values.
+
+**D11. Module descriptors** — each module is an adios attrset augmented
+with red-tape metadata (`discover`, `optionsFn`, `perSystem`).
+`extraModules` adds standalone descriptors that independently scan the
+filesystem and produce outputs — no core code changes needed. The core
+`hosts` module and a contrib host module each scan `hosts/` for their
+own filenames without conflict.
 
 **D9. Flake reuses npins** — `flake.nix` has no flake inputs.
 npins is the single source of truth (same pattern as adios).
@@ -146,7 +153,8 @@ npins is the single source of truth (same pattern as adios).
 
 ```
 red-tape/
-├── default.nix    # Everything: scanning, modules, mkFlake, eval (~500 sloc)
+├── default.nix    # Everything: scanning, modules, mkFlake, eval (~660 sloc)
+├── contrib/       # Optional module descriptors (system-manager, etc.)
 ├── flake.nix      # import ./. {} + lib functor wrapper (~20 sloc)
 ├── shell.nix      # Dev shell
 └── tests/

@@ -2,7 +2,8 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) _internal fixtures;
-  inherit (_internal) discover;
+  inherit (_internal) coreDescriptors;
+  discover = src: _internal.discover src coreDescriptors;
 in
 {
   # --- Packages ---
@@ -51,24 +52,24 @@ in
     expr =
       let result = discover (fixtures + "/empty");
       in {
-        packages = result.packages;
-        devshells = result.devshells;
-        checks = result.checks;
-        formatter = result.formatter;
-        hosts = result.hosts;
-        modules = result.modules;
-        overlays = result.overlays;
-        templates = result.templates;
+        hasPackages  = result ? packages;
+        hasDevshells = result ? devshells;
+        hasChecks    = result ? checks;
+        hasHosts     = result ? hosts;
+        hasOverlays  = result ? overlays;
+        hasModules   = result ? modules-export;
+        formatter    = result.formatter;
+        templates    = result.templates;
       };
     expected = {
-      packages = {};
-      devshells = {};
-      checks = {};
-      formatter = null;
-      hosts = {};
-      modules = {};
-      overlays = {};
-      templates = {};
+      hasPackages  = false;
+      hasDevshells = false;
+      hasChecks    = false;
+      hasHosts     = false;
+      hasOverlays  = false;
+      hasModules   = false;
+      formatter    = null;
+      templates    = {};
     };
   };
 
@@ -85,8 +86,8 @@ in
   };
 
   testNoOverlays = {
-    expr = (discover (fixtures + "/minimal")).overlays;
-    expected = {};
+    expr = (discover (fixtures + "/minimal")) ? overlays;
+    expected = false;
   };
 
   # --- Hosts ---
@@ -116,19 +117,19 @@ in
 
   testDiscoverModuleTypes = {
     expr =
-      let mods = (discover (fixtures + "/full")).modules;
+      let mods = (discover (fixtures + "/full")).modules-export;
       in builtins.sort builtins.lessThan (builtins.attrNames mods);
     expected = [ "darwin" "home" "nixos" ];
   };
 
   testDiscoverNixosModules = {
     expr = builtins.sort builtins.lessThan
-      (builtins.attrNames (discover (fixtures + "/full")).modules.nixos);
+      (builtins.attrNames (discover (fixtures + "/full")).modules-export.nixos);
     expected = [ "injected" "server" ];
   };
 
   testDiscoverHomeModules = {
-    expr = builtins.attrNames (discover (fixtures + "/full")).modules.home;
+    expr = builtins.attrNames (discover (fixtures + "/full")).modules-export.home;
     expected = [ "shared" ];
   };
 

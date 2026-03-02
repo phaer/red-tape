@@ -2,24 +2,26 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) adios mockPkgs sys fixtures _internal;
-  inherit (_internal) discover filterPlatforms;
+  inherit (_internal) filterPlatforms coreDescriptors runDiscover;
   mods = _internal.modules;
+
+  discover = src: _internal.discover src coreDescriptors;
 
   mkModules = discovered:
     { nixpkgs = mods.modNixpkgs; formatter = mods.modFormatter; }
-    // (if discovered.packages  != {} then { packages  = mods.modPackages; }  else {})
-    // (if discovered.devshells != {} then { devshells = mods.modDevshells; } else {})
-    // (if discovered.checks    != {} then { checks    = mods.modChecks; }    else {})
-    // (if discovered.overlays  != {} then { overlays  = mods.modOverlays; }  else {});
+    // (if discovered ? packages  then { packages  = mods.modPackages; }  else {})
+    // (if discovered ? devshells then { devshells = mods.modDevshells; } else {})
+    // (if discovered ? checks    then { checks    = mods.modChecks; }    else {})
+    // (if discovered ? overlays  then { overlays  = mods.modOverlays; }  else {});
 
   mkOptions = discovered:
     { "/nixpkgs"   = { system = sys; pkgs = mockPkgs; };
-      "/formatter" = { formatterPath = discovered.formatter; };
+      "/formatter" = { formatterPath = discovered.formatter or null; };
     }
-    // (if discovered.packages  != {} then { "/packages"  = { discovered = discovered.packages; }; }  else {})
-    // (if discovered.devshells != {} then { "/devshells" = { discovered = discovered.devshells; }; } else {})
-    // (if discovered.checks    != {} then { "/checks"    = { discovered = discovered.checks; }; }    else {})
-    // (if discovered.overlays  != {} then { "/overlays"  = { discovered = discovered.overlays; }; }  else {});
+    // (if discovered ? packages  then { "/packages"  = { discovered = discovered.packages; }; }  else {})
+    // (if discovered ? devshells then { "/devshells" = { discovered = discovered.devshells; }; } else {})
+    // (if discovered ? checks    then { "/checks"    = { discovered = discovered.checks; }; }    else {})
+    // (if discovered ? overlays  then { "/overlays"  = { discovered = discovered.overlays; }; }  else {});
 
   evalFixture = src:
     let

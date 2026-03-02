@@ -11,6 +11,7 @@ let
     addErrorContext
     all
     attrNames
+    attrValues
     concatMap
     elem
     filter
@@ -88,16 +89,16 @@ let
       in
       dirs // nixFiles;  # .nix files take precedence
 
-  scanHosts = path:
+  # Scan hosts/ subdirectories for files matching a list of { type; file }.
+  # Checked in order — first match wins per host directory.
+  # Callers decide which types to look for; nothing is hardcoded here.
+  scanHosts = path: hostTypes:
     let
       detectType = hostPath:
-        if pathExists (hostPath + "/default.nix") then
-          { type = "custom"; configPath = hostPath + "/default.nix"; }
-        else if pathExists (hostPath + "/configuration.nix") then
-          { type = "nixos"; configPath = hostPath + "/configuration.nix"; }
-        else if pathExists (hostPath + "/darwin-configuration.nix") then
-          { type = "darwin"; configPath = hostPath + "/darwin-configuration.nix"; }
-        else null;
+        let matches = filter (t: pathExists (hostPath + "/${t.file}")) hostTypes;
+        in if matches == [] then null
+           else let t = head matches;
+                in { type = t.type; configPath = hostPath + "/${t.file}"; };
     in
     if !pathExists path then {}
     else
@@ -134,17 +135,19 @@ let
   optionalPath = path:
     if pathExists path then path else null;
 
-  discover = src: {
-    packages  = scanDir (src + "/packages") // optionalFile (src + "/package.nix") "default";
-    devshells = scanDir (src + "/devshells") // optionalFile (src + "/devshell.nix") "default";
-    checks    = scanDir (src + "/checks");
-    formatter = optionalPath (src + "/formatter.nix");
-    overlays  = scanDir (src + "/overlays") // optionalFile (src + "/overlay.nix") "default";
-    hosts     = scanHosts (src + "/hosts");
-    modules   = scanModuleTypes (src + "/modules");
-    templates = scanTemplates (src + "/templates");
-    lib       = optionalPath (src + "/lib/default.nix");
-  };
+  # Templates and lib aren't adios modules — discovered separately by entry points.
+  discoverTemplates = src: scanTemplates (src + "/templates");
+  discoverLib       = src: optionalPath (src + "/lib/default.nix");
+
+  # Convenience: full discovery including templates, lib, and formatter path.
+  # Combines runDiscover (module descriptors) with the non-module outputs.
+  discover = src: descriptors:
+    let mods = runDiscover src descriptors;
+    in mods // {
+      formatter = optionalPath (src + "/formatter.nix");
+      templates = discoverTemplates src;
+      lib       = discoverLib src;
+    };
 
   # ── Transpose ──────────────────────────────────────────────────────
 
@@ -187,15 +190,33 @@ let
   # Data-only: provides system + pkgs to downstream modules
   modNixpkgs = {
     name = "nixpkgs";
+    perSystem = true;  # infrastructure module — not collected as an output
     options = {
       system = { type = types.string; };
       pkgs   = { type = types.attrs; };
     };
   };
 
-  # Generic per-system module factory
-  mkPerSystemMod = { name, postProcess ? ({ built, ... }: built) }: {
-    inherit name;
+  # ── Module descriptors ─────────────────────────────────────────────
+  #
+  # Each descriptor is an adios module attrset augmented with red-tape metadata:
+  #
+  #   discover  : src -> value | null   — how to find this module's inputs on disk
+  #                                        null or {} means "nothing found, skip"
+  #   optionsFn : ctx -> options-attrset — how to turn discovered value + context
+  #                                        into adios options for this module
+  #   perSystem : bool (default false)  — true: depends on /nixpkgs, result is
+  #                                        transposed across systems; false: agnostic
+  #
+  # The discover/optionsFn/perSystem fields are ignored by adios (extra keys are
+  # dropped by loadModule). They are red-tape's extension protocol.
+
+  # Generic per-system module factory (packages / devshells / checks)
+  mkPerSystemMod = { name, discover, postProcess ? ({ built, ... }: built) }: {
+    inherit name discover;
+    perSystem = true;
+    optionsFn = { discovered, extraScope, ... }:
+      { discovered = discovered.${name}; inherit extraScope; };
     inputs.nixpkgs = { path = "/nixpkgs"; };
     options = {
       discovered = { type = types.attrs; default = {}; };
@@ -204,9 +225,9 @@ let
     impl = { inputs, options, ... }:
       let
         system = inputs.nixpkgs.system;
-        pkgs = inputs.nixpkgs.pkgs;
-        scope = { inherit pkgs system; lib = pkgs.lib; } // options.extraScope;
-        built = mapAttrs (pname: entry:
+        pkgs   = inputs.nixpkgs.pkgs;
+        scope  = { inherit pkgs system; lib = pkgs.lib; } // options.extraScope;
+        built  = mapAttrs (pname: entry:
           let path = if entry.type == "directory" then entry.path + "/default.nix" else entry.path;
           in callFile scope path { inherit pname; }
         ) options.discovered;
@@ -215,31 +236,44 @@ let
   };
 
   modPackages = mkPerSystemMod {
-    name = "packages";
+    name    = "packages";
+    discover = src:
+      let v = scanDir (src + "/packages") // optionalFile (src + "/package.nix") "default";
+      in if v == {} then null else v;
     postProcess = { system, built, ... }:
       { packages = built; filteredPackages = filterPlatforms system built; };
   };
 
   modDevshells = mkPerSystemMod {
-    name = "devshells";
+    name    = "devshells";
+    discover = src:
+      let v = scanDir (src + "/devshells") // optionalFile (src + "/devshell.nix") "default";
+      in if v == {} then null else v;
     postProcess = { built, ... }: { devShells = built; };
   };
 
   modChecks = mkPerSystemMod {
-    name = "checks";
+    name    = "checks";
+    discover = src:
+      let v = scanDir (src + "/checks");
+      in if v == {} then null else v;
     postProcess = { system, built, ... }: { checks = filterPlatforms system built; };
   };
 
   modFormatter = {
-    name = "formatter";
+    name      = "formatter";
+    perSystem = true;
+    # formatter is always present (falls back to nixfmt-tree) — no discover needed
+    optionsFn = { discovered, extraScope, ... }:
+      { formatterPath = discovered.formatter or null; inherit extraScope; };
     inputs.nixpkgs = { path = "/nixpkgs"; };
     options = {
-      formatterPath = { type = types.any; default = null; };
-      extraScope     = { type = types.attrs; default = {}; };
+      formatterPath = { type = types.any;   default = null; };
+      extraScope    = { type = types.attrs; default = {}; };
     };
     impl = { inputs, options, ... }:
       let
-        pkgs = inputs.nixpkgs.pkgs;
+        pkgs  = inputs.nixpkgs.pkgs;
         scope = { inherit pkgs; system = inputs.nixpkgs.system; lib = pkgs.lib; }
           // options.extraScope;
       in {
@@ -251,7 +285,12 @@ let
   };
 
   modOverlays = {
-    name = "overlays";
+    name     = "overlays";
+    discover = src:
+      let v = scanDir (src + "/overlays") // optionalFile (src + "/overlay.nix") "default";
+      in if v == {} then null else v;
+    optionsFn = { discovered, agnosticScope, ... }:
+      { discovered = discovered.overlays; extraScope = agnosticScope; };
     options = {
       discovered = { type = types.attrs; default = {}; };
       extraScope = { type = types.attrs; default = {}; };
@@ -264,20 +303,28 @@ let
     };
   };
 
-  classMap = { "nixos" = "nixosConfigurations"; "nix-darwin" = "darwinConfigurations"; };
+  coreHostTypes = [
+    { type = "custom"; file = "default.nix"; }
+    { type = "nixos";  file = "configuration.nix"; }
+    { type = "darwin"; file = "darwin-configuration.nix"; }
+  ];
 
   modHosts = {
-    name = "hosts";
+    name     = "hosts";
+    discover = src: scanHosts (src + "/hosts") coreHostTypes;
+    optionsFn = { discovered, flakeInputs, self, ... }:
+      { discovered = discovered.hosts; inherit flakeInputs self; };
     options = {
-      discovered   = { type = types.attrs; default = {}; };
-      flakeInputs  = { type = types.attrs; default = {}; };
-      self         = { type = types.any;   default = null; };
+      discovered  = { type = types.attrs; default = {}; };
+      flakeInputs = { type = types.attrs; default = {}; };
+      self        = { type = types.any;   default = null; };
     };
     impl = { options, ... }:
       let
         inherit (options) flakeInputs self;
-        allInputs = flakeInputs // (if self != null then { inherit self; } else {});
+        allInputs   = flakeInputs // (if self != null then { inherit self; } else {});
         specialArgs = { flake = self; inputs = allInputs; };
+        classMap    = { "nixos" = "nixosConfigurations"; "nix-darwin" = "darwinConfigurations"; };
 
         loadHost = hostName: hostInfo:
           addErrorContext "while building host '${hostName}' (${hostInfo.type})" (
@@ -289,7 +336,7 @@ let
             else if hostInfo.type == "nixos" then {
               class = "nixos";
               value = flakeInputs.nixpkgs.lib.nixosSystem {
-                modules = [ hostInfo.configPath ];
+                modules     = [ hostInfo.configPath ];
                 specialArgs = specialArgs // { inherit hostName; };
               };
             }
@@ -299,7 +346,7 @@ let
               in {
                 class = "nix-darwin";
                 value = nix-darwin.lib.darwinSystem {
-                  modules = [ hostInfo.configPath ];
+                  modules     = [ hostInfo.configPath ];
                   specialArgs = specialArgs // { inherit hostName; };
                 };
               }
@@ -323,16 +370,21 @@ let
   typeAliases = { nixos = "nixosModules"; darwin = "darwinModules"; home = "homeModules"; };
 
   modModulesExport = {
-    name = "modules-export";
+    name     = "modules-export";
+    discover = src:
+      let v = scanModuleTypes (src + "/modules");
+      in if v == {} then null else v;
+    optionsFn = { discovered, flakeInputs, self, ... }:
+      { discovered = discovered.modules-export; inherit flakeInputs self; };
     options = {
-      discovered   = { type = types.attrs; default = {}; };
-      flakeInputs  = { type = types.attrs; default = {}; };
-      self         = { type = types.any;   default = null; };
+      discovered  = { type = types.attrs; default = {}; };
+      flakeInputs = { type = types.attrs; default = {}; };
+      self        = { type = types.any;   default = null; };
     };
     impl = { options, ... }:
       let
         inherit (options) flakeInputs self;
-        allInputs = flakeInputs // (if self != null then { inherit self; } else {});
+        allInputs     = flakeInputs // (if self != null then { inherit self; } else {});
         publisherArgs = { flake = self; inputs = allInputs; };
 
         expectsPublisherArgs = fn:
@@ -343,7 +395,7 @@ let
         importModule = entry:
           let
             path = if entry.type == "directory" then entry.path + "/default.nix" else entry.path;
-            mod = import path;
+            mod  = import path;
           in
           if expectsPublisherArgs mod
           then mod (intersectAttrs (functionArgs mod) publisherArgs)
@@ -360,16 +412,47 @@ let
   };
 
   # ── Module tree assembly ────────────────────────────────────────────
+  #
+  # coreDescriptors: the built-in module descriptors, keyed by name.
+  # extraModules: user-supplied descriptors (same shape) keyed by name — can
+  #   override a core descriptor (same key) or add entirely new ones.
+  #
+  # Both discover and optionsFn are honoured for all descriptors generically.
 
-  mkModules = { discovered, extraModules ? {} }:
-    { nixpkgs = modNixpkgs; formatter = modFormatter; }
-    // (if discovered.packages  != {} then { packages       = modPackages; }      else {})
-    // (if discovered.devshells != {} then { devshells      = modDevshells; }     else {})
-    // (if discovered.checks    != {} then { checks         = modChecks; }        else {})
-    // (if discovered.hosts     != {} then { hosts          = modHosts; }         else {})
-    // (if discovered.overlays  != {} then { overlays       = modOverlays; }      else {})
-    // (if discovered.modules   != {} then { modules-export = modModulesExport; } else {})
-    // extraModules;
+  coreDescriptors = {
+    nixpkgs        = modNixpkgs;
+    formatter      = modFormatter;
+    packages       = modPackages;
+    devshells      = modDevshells;
+    checks         = modChecks;
+    overlays       = modOverlays;
+    hosts          = modHosts;
+    modules-export = modModulesExport;
+  };
+
+  # Run all descriptors' discover functions and collect non-null/non-empty results.
+  # The key in the returned attrset matches the descriptor's name.
+  # A discover function returns null or {} to signal "nothing found".
+  isEmpty = v: v == null || v == {};
+  runDiscover = src: descriptors:
+    foldl' (acc: desc:
+      if desc ? discover
+      then let v = desc.discover src;
+           in if !isEmpty v then acc // { ${desc.name} = v; } else acc
+      else acc
+    ) {} (attrValues descriptors);
+
+  # Build the adios module tree from all descriptors.
+  # A descriptor is included if:
+  #   - it has no discover (always present, e.g. nixpkgs, formatter), or
+  #   - its name appears in discovered (discover returned non-null)
+  mkModules = descriptors: discovered:
+    listToAttrs (filter (x: x != null) (map (name:
+      let desc = descriptors.${name};
+      in if !(desc ? discover) || discovered ? ${name}
+         then { inherit name; value = desc; }
+         else null
+    ) (attrNames descriptors)));
 
   mkExtraScope = { flakeInputs ? {}, self ? null, perSystem ? {} }:
     let allInputs = mkAllInputs flakeInputs self;
@@ -380,28 +463,40 @@ let
   mkConfigOptions = config:
     listToAttrs (map (key: { name = "/${key}"; value = config.${key}; }) (attrNames config));
 
+  # Build the adios options attrset from all active descriptors.
+  # For each descriptor with optionsFn, call it with context to get its options.
+  # configOptions (from user's `config` param) are merged last and win.
+  # Build adios options from active descriptors (those present in modules).
+  # Each descriptor's optionsFn is called with context to produce its options.
+  # configOptions (from user's `config` param) are merged last and win.
   mkOptions =
-    { modules, discovered, configOptions
+    { descriptors, discovered, configOptions
     , extraScope ? {}, agnosticScope ? {}
     , flakeInputs ? {}, self ? null
     }: nixpkgsOpt:
-    { "/nixpkgs"    = nixpkgsOpt;
-      "/formatter"  = { formatterPath = discovered.formatter; inherit extraScope; };
-    }
-    // (if modules ? packages  then { "/packages"  = { discovered = discovered.packages;  inherit extraScope; }; } else {})
-    // (if modules ? devshells then { "/devshells" = { discovered = discovered.devshells; inherit extraScope; }; } else {})
-    // (if modules ? checks    then { "/checks"    = { discovered = discovered.checks;    inherit extraScope; }; } else {})
-    // (if modules ? hosts     then { "/hosts"          = { discovered = discovered.hosts;   inherit flakeInputs self; }; } else {})
-    // (if modules ? overlays  then { "/overlays"       = { discovered = discovered.overlays; extraScope = agnosticScope; }; } else {})
-    // (if modules ? modules-export then { "/modules-export" = { discovered = discovered.modules; inherit flakeInputs self; }; } else {})
+    let
+      ctx = { inherit discovered extraScope agnosticScope flakeInputs self; };
+      # Include a descriptor's options if it has optionsFn AND is active
+      # (either has no discover field, or was discovered).
+      isActive = desc: !(desc ? discover) || discovered ? ${desc.name};
+      optFromDescriptors = foldl' (acc: desc:
+        if desc ? optionsFn && isActive desc
+        then acc // { "/${desc.name}" = desc.optionsFn ctx; }
+        else acc
+      ) {} (attrValues descriptors);
+    in
+    { "/nixpkgs" = nixpkgsOpt; }
+    // optFromDescriptors
     // configOptions;
 
   # ── Result collection ──────────────────────────────────────────────
 
-  collectPerSystem = { evaled, system }:
+  collectPerSystem = { descriptors, evaled, system }:
     let
       mods = evaled.modules;
-      has = name: mods ? ${name};
+      has  = name: mods ? ${name};
+
+      # Core cross-referencing logic: packages and devshells feed into checks
       pkgResult = if has "packages"  then mods.packages {}  else { filteredPackages = {}; };
       devResult = if has "devshells" then mods.devshells {}  else { devShells = {}; };
       fmtResult = mods.formatter {};
@@ -411,44 +506,41 @@ let
         withPrefix "pkgs-" pkgResult.filteredPackages
         // listToAttrs (concatMap (pname:
           let
-            pkg = pkgResult.filteredPackages.${pname};
+            pkg   = pkgResult.filteredPackages.${pname};
             tests = filterPlatforms system (pkg.passthru.tests or {});
           in map (tname: {
-            name = "pkgs-${pname}-${tname}";
+            name  = "pkgs-${pname}-${tname}";
             value = tests.${tname};
           }) (attrNames tests)
         ) (attrNames pkgResult.filteredPackages));
-    in {
-      packages  = pkgResult.filteredPackages;
-      devShells = devResult.devShells;
-      formatter = fmtResult.formatter;
-      checks    = packageChecks // withPrefix "devshell-" devResult.devShells // chkResult.checks;
-    };
 
-  # Known per-system module names — their results are transposed, not merged here
-  perSystemModuleNames = [ "nixpkgs" "packages" "devshells" "formatter" "checks" ];
+      coreResult = {
+        packages  = pkgResult.filteredPackages;
+        devShells = devResult.devShells;
+        formatter = fmtResult.formatter;
+        checks    = packageChecks // withPrefix "devshell-" devResult.devShells // chkResult.checks;
+      };
 
-  collectAgnostic = evaled:
+      # Extra per-system descriptors (not in core): just merge their results
+      coreNames = [ "nixpkgs" "packages" "devshells" "formatter" "checks" ];
+      extraPerSystem = foldl' (acc: desc:
+        if (desc.perSystem or false) && !(elem desc.name coreNames) && has desc.name
+        then acc // (mods.${desc.name} {})
+        else acc
+      ) {} (attrValues descriptors);
+    in
+    coreResult // extraPerSystem;
+
+  collectAgnostic = { descriptors, evaled }:
     let
       mods = evaled.modules;
-      has = name: mods ? ${name};
-      hostResult   = if has "hosts"          then mods.hosts {}          else {};
-      ovlResult    = if has "overlays"       then mods.overlays {}       else {};
-      modExpResult = if has "modules-export" then mods.modules-export {} else {};
-
-      # Collect results from any extra modules not handled above.
-      # Users can add custom system-agnostic modules via extraModules and their
-      # results are automatically merged into the top-level flake outputs.
-      knownNames = perSystemModuleNames ++ [ "hosts" "overlays" "modules-export" ];
-      extraResults = foldl' (acc: name:
-        if elem name knownNames then acc
-        else acc // (mods.${name} {})
-      ) {} (attrNames mods);
+      has  = name: mods ? ${name};
+      # All agnostic descriptors: those without perSystem = true
+      agnosticDescs = filter (desc: !(desc.perSystem or false)) (attrValues descriptors);
     in
-    extraResults
-    // hostResult
-    // (if ovlResult != {} then { overlays = ovlResult.overlays; } else {})
-    // modExpResult;
+    foldl' (acc: desc:
+      if has desc.name then acc // (mods.${desc.name} {}) else acc
+    ) {} agnosticDescs;
 
   # ── perSystem helper ───────────────────────────────────────────────
 
@@ -486,10 +578,10 @@ let
           else if isString prefix then src + "/${prefix}"
           else throw "red-tape: prefix must be a string or path"
         else src;
-
-      discovered    = discover resolvedSrc;
+      descriptors   = coreDescriptors // extraModules;
+      discovered    = runDiscover resolvedSrc descriptors;
       configOptions = mkConfigOptions config;
-      modules       = mkModules { inherit discovered extraModules; };
+      modules       = mkModules descriptors discovered;
       loaded        = adios { name = "red-tape"; inherit modules; };
 
       nixpkgsFor = system:
@@ -506,22 +598,22 @@ let
           extraScope = mkExtraScope { inherit flakeInputs self perSystem; };
         in
         mkOptions {
-          inherit modules discovered configOptions extraScope agnosticScope flakeInputs self;
+          inherit descriptors discovered configOptions extraScope agnosticScope flakeInputs self;
         } { inherit system; pkgs = nixpkgsFor system; };
 
       firstSystem  = head systems;
       firstEvaled  = loaded { options = mkOpts firstSystem; };
-      firstResult  = collectPerSystem { evaled = firstEvaled; system = firstSystem; };
+      firstResult  = collectPerSystem { inherit descriptors; evaled = firstEvaled; system = firstSystem; };
 
       otherResults = listToAttrs (map (sys:
         let overridden = firstEvaled.override { options = mkOpts sys; };
-        in { name = sys; value = collectPerSystem { evaled = overridden; system = sys; }; }
+        in { name = sys; value = collectPerSystem { inherit descriptors; evaled = overridden; system = sys; }; }
       ) (tail systems));
 
       transposed        = transpose ({ ${firstSystem} = firstResult; } // otherResults);
-      agnosticFromMods  = collectAgnostic firstEvaled;
-      templatesOutput   = buildTemplates discovered.templates;
-      libOutput         = importLib { libPath = discovered.lib; flake = self; inputs = allInputs; };
+      agnosticFromMods  = collectAgnostic { inherit descriptors; evaled = firstEvaled; };
+      templatesOutput   = buildTemplates (discoverTemplates resolvedSrc);
+      libOutput         = importLib { libPath = discoverLib resolvedSrc; flake = self; inputs = allInputs; };
     in
     transposed // agnosticFromMods
     // (if templatesOutput != {} then { templates = templatesOutput; } else {})
@@ -535,19 +627,20 @@ let
     }:
     let
       system        = pkgs.system or pkgs.stdenv.hostPlatform.system;
-      discovered    = discover src;
+      descriptors   = coreDescriptors // extraModules;
+      discovered    = runDiscover src descriptors;
       configOptions = mkConfigOptions config;
-      modules       = mkModules { inherit discovered extraModules; };
+      modules       = mkModules descriptors discovered;
       loaded        = adios { name = "red-tape"; inherit modules; };
 
-      opts    = mkOptions { inherit modules discovered configOptions extraScope; }
+      opts    = mkOptions { inherit descriptors discovered configOptions extraScope; }
                   { inherit system pkgs; };
       evaled  = loaded { options = opts; };
-      result  = collectPerSystem { inherit evaled system; };
-      agnostic = collectAgnostic evaled;
+      result  = collectPerSystem { inherit descriptors evaled system; };
+      agnostic = collectAgnostic { inherit descriptors evaled; };
 
-      templatesOutput = buildTemplates discovered.templates;
-      libOutput       = importLib { libPath = discovered.lib; };
+      templatesOutput = buildTemplates (discoverTemplates src);
+      libOutput       = importLib { libPath = discoverLib src; };
     in
     result // agnostic
     // { shell = result.devShells.default or null; }
@@ -560,8 +653,9 @@ in
 
   # Exposed for tests — not part of the public API
   _internal = {
-    inherit discover scanDir scanHosts filterPlatforms transpose
-            buildTemplates callFile;
+    inherit scanDir scanHosts filterPlatforms transpose
+            buildTemplates callFile runDiscover discover coreDescriptors
+            discoverTemplates discoverLib coreHostTypes;
     modules = {
       inherit modNixpkgs modPackages modDevshells modChecks
               modFormatter modOverlays modHosts modModulesExport;

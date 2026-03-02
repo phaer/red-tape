@@ -625,93 +625,63 @@ red-tape is built on [adios](https://github.com/adisbladis/adios) modules.
 Every output type is an adios module — you can add your own via `extraModules`
 and they integrate seamlessly with the rest of the tree.
 
-### What an adios module looks like
+### Module descriptors
 
-An adios module is a plain Nix attrset:
+A module descriptor is a plain Nix attrset with two layers:
+
+1. **adios fields** — `name`, `options`, `inputs`, `impl` — wired into the
+   adios module tree for option resolution and dependency tracking.
+2. **red-tape metadata** — `discover`, `optionsFn`, `perSystem` — tells
+   red-tape how to discover files, wire options, and collect results.
 
 ```nix
 {
-  name = "my-module";           # identifies this module in the tree
+  name = "my-module";              # unique identifier
 
-  inputs = {                    # other modules this one depends on
-    nixpkgs = { path = "/nixpkgs"; };
-  };
+  # red-tape metadata (ignored by adios)
+  discover  = src: ...;            # src -> value | null (null = skip module)
+  optionsFn = { discovered, ... }: # how to wire discovered data into adios options
+    { discovered = discovered.my-module; };
+  perSystem  = false;              # true: depends on /nixpkgs, transposed
 
-  options = {                   # typed options, set by the entry point
+  # adios fields
+  options = {                      # typed options, passed by the entry point
     discovered = { type = types.attrs; default = {}; };
-    extraScope = { type = types.attrs; default = {}; };
   };
-
-  impl = { inputs, options, ... }:  # the computation
-    {
-      # return value merged into flake outputs by collectAgnostic
-    };
+  impl = { options, ... }: {       # the computation — result merged into outputs
+    myOutputs = buildThings options.discovered;
+  };
 }
 ```
 
-`inputs` wires other modules' options into this one. `options` are typed
-values passed in from outside. `impl` receives both and returns the result.
-
-Modules with no `inputs.nixpkgs` are **system-agnostic** — adios evaluates
-them once and their result is merged directly into the top-level flake
-outputs by `collectAgnostic`. Modules that depend on `/nixpkgs` are
-**per-system** and their results are transposed.
+Modules with `perSystem = true` depend on `/nixpkgs` and their results are
+transposed across systems. All others are system-agnostic — evaluated once,
+results merged directly into top-level flake outputs.
 
 ### Example: nix-on-droid support
 
 [nix-on-droid](https://github.com/nix-community/nix-on-droid) manages
-Android devices via Nix. It has its own flake output convention:
+Android devices via Nix. It produces `nixOnDroidConfigurations.*` outputs.
+
+red-tape's core `hosts` module only handles `nixos` and `nix-darwin`. Rather
+than replacing it, we add a **standalone descriptor** that independently scans
+`hosts/` for its own filename convention (`droid-configuration.nix`):
 
 ```nix
-nixOnDroidConfigurations.default = nix-on-droid.lib.nixOnDroidConfiguration {
-  pkgs = import nixpkgs { system = "aarch64-linux"; };
-  modules = [ ./nix-on-droid.nix ];
-};
-```
+# nix/modules/nix-on-droid.nix
+{ adios, scanHosts }:
+let types = adios.types;
+in {
+  name = "nix-on-droid";
 
-red-tape's `hosts` module only handles `nixos` and `nix-darwin` classes.
-To add nix-on-droid, we use the **escape hatch** for discovery and a
-**custom adios module** to produce the right output key.
+  # Scan hosts/ for droid-configuration.nix files
+  discover = src:
+    scanHosts (src + "/hosts") [
+      { type = "nix-on-droid"; file = "droid-configuration.nix"; }
+    ];
 
-#### Step 1: Use the escape hatch for the host
-
-The `hosts/*/default.nix` escape hatch lets you return any `{ class, value }`:
-
-```nix
-# hosts/myphone/default.nix
-{ flake, inputs, hostName }:
-{
-  class = "nix-on-droid";
-  value = inputs.nix-on-droid.lib.nixOnDroidConfiguration {
-    pkgs = import inputs.nixpkgs { system = "aarch64-linux"; };
-    modules = [ ./nix-on-droid.nix ];
-    extraSpecialArgs = { inherit flake inputs hostName; };
-  };
-}
-```
-
-This gets *discovered* as a custom host, but the built-in `hosts` module
-doesn't know the `"nix-on-droid"` class — it only maps `"nixos"` and
-`"nix-darwin"` to output keys.
-
-#### Step 2: Replace the hosts module
-
-Use `extraModules` to replace the built-in `hosts` module with one that
-also handles the `"nix-on-droid"` class:
-
-```nix
-# nix/modules/hosts-with-droid.nix
-{ types, ... }:
-let
-  # Extended class map
-  classMap = {
-    "nixos"        = "nixosConfigurations";
-    "nix-darwin"   = "darwinConfigurations";
-    "nix-on-droid" = "nixOnDroidConfigurations";
-  };
-in
-{
-  name = "hosts";   # same name — replaces the built-in hosts module
+  optionsFn = { discovered, flakeInputs, self, ... }:
+    { discovered = discovered.nix-on-droid; inherit flakeInputs self; };
 
   options = {
     discovered  = { type = types.attrs; default = {}; };
@@ -722,52 +692,25 @@ in
   impl = { options, ... }:
     let
       inherit (options) flakeInputs self;
-      allInputs   = flakeInputs // (if self != null then { inherit self; } else {});
-      specialArgs = { flake = self; inputs = allInputs; };
-
-      loadHost = hostName: hostInfo:
-        if hostInfo.type == "custom" then
-          import hostInfo.configPath {
-            inherit (specialArgs) flake inputs;
+      nix-on-droid = flakeInputs.nix-on-droid
+        or (throw "red-tape: nix-on-droid module needs inputs.nix-on-droid");
+    in {
+      nixOnDroidConfigurations = builtins.mapAttrs (hostName: hostInfo:
+        nix-on-droid.lib.nixOnDroidConfiguration {
+          pkgs = import flakeInputs.nixpkgs { system = "aarch64-linux"; };
+          modules = [ hostInfo.configPath ];
+          extraSpecialArgs = {
+            flake = self;
+            inputs = flakeInputs // (if self != null then { inherit self; } else {});
             inherit hostName;
-          }
-        else if hostInfo.type == "nixos" then {
-          class = "nixos";
-          value = flakeInputs.nixpkgs.lib.nixosSystem {
-            modules     = [ hostInfo.configPath ];
-            specialArgs = specialArgs // { inherit hostName; };
           };
         }
-        else if hostInfo.type == "darwin" then {
-          class = "nix-darwin";
-          value = (flakeInputs.nix-darwin or (throw "missing inputs.nix-darwin"))
-            .lib.darwinSystem {
-              modules     = [ hostInfo.configPath ];
-              specialArgs = specialArgs // { inherit hostName; };
-            };
-        }
-        else throw "unknown host type '${hostInfo.type}' for '${hostName}'";
-
-      loaded = builtins.mapAttrs loadHost options.discovered;
-
-      mkCategory = category:
-        builtins.listToAttrs (builtins.filter (x: x != null)
-          (map (name:
-            let host = loaded.${name};
-            in if (classMap.${host.class} or null) == category
-               then { inherit name; value = host.value; }
-               else null
-          ) (builtins.attrNames loaded)));
-    in
-    {
-      nixosConfigurations       = mkCategory "nixosConfigurations";
-      darwinConfigurations      = mkCategory "darwinConfigurations";
-      nixOnDroidConfigurations  = mkCategory "nixOnDroidConfigurations";
+      ) options.discovered;
     };
 }
 ```
 
-#### Step 3: Wire it into your flake
+Wire it into your flake:
 
 ```nix
 # flake.nix
@@ -776,100 +719,103 @@ in
     nixpkgs.url      = "github:NixOS/nixpkgs/nixos-unstable";
     nix-on-droid.url = "github:nix-community/nix-on-droid/release-24.05";
     nix-on-droid.inputs.nixpkgs.follows = "nixpkgs";
-    red-tape.url = "github:you/red-tape";
+    red-tape.url     = "github:you/red-tape";
   };
 
   outputs = inputs:
-    let
-      red-tape = inputs.red-tape.lib;
-    in
-    red-tape {
+    let rt = inputs.red-tape.lib;
+    in rt {
       inherit inputs;
-      extraModules = {
-        # Pass adios so the module can destructure { types, ... }
-        hosts = import ./nix/modules/hosts-with-droid.nix red-tape.adios;
+      extraModules.nix-on-droid = import ./nix/modules/nix-on-droid.nix {
+        inherit (rt) adios;
+        scanHosts = rt._internal.scanHosts;
       };
     };
 }
 ```
 
-Now `hosts/myphone/default.nix` is discovered, the custom module handles it,
-and `nixOnDroidConfigurations.myphone` appears in the flake outputs — all
-without touching red-tape's core.
+Then place your configs at `hosts/<name>/droid-configuration.nix`. The core
+hosts module continues to find `configuration.nix` and
+`darwin-configuration.nix` in the same directory — no conflicts.
+
+### How standalone host modules work
+
+Each module independently scans `hosts/` for its own filenames via
+`scanHosts`. The core hosts module looks for `configuration.nix`,
+`darwin-configuration.nix`, and `default.nix`. A contrib module looks for
+`system-configuration.nix` or `droid-configuration.nix`. They coexist
+because each only matches files it asked for.
+
+A host directory can contain multiple config files for different systems
+(e.g. both `configuration.nix` and `system-configuration.nix`). Each module
+independently discovers and builds its own outputs.
 
 ### Example: a completely new output type
 
-For outputs with no host-like structure — say, a set of system images — you
-can add a brand new system-agnostic module. Its result is automatically
-merged into the top-level flake outputs by `collectAgnostic`:
+For outputs unrelated to hosts — say, deploy targets — add a descriptor
+that scans its own directory:
 
 ```nix
-# A module that scans images/ and builds them
-let
-  redTape = import inputs.red-tape {};
-  inherit (redTape._internal) discover callFile;
-in
-{
-  name = "images";   # new name — no conflict with built-ins
+# nix/modules/deploy.nix
+{ adios, scanDir }:
+let types = adios.types;
+in {
+  name = "deploy";
+
+  discover = src:
+    let v = scanDir (src + "/deploy");
+    in if v == {} then null else v;
+
+  optionsFn = { discovered, flakeInputs, self, ... }:
+    { discovered = discovered.deploy; inherit flakeInputs self; };
 
   options = {
-    src         = { type = types.path; };
+    discovered  = { type = types.attrs; default = {}; };
     flakeInputs = { type = types.attrs; default = {}; };
     self        = { type = types.any;   default = null; };
   };
 
-  impl = { options, ... }:
-    let
-      allInputs = options.flakeInputs
-        // (if options.self != null then { self = options.self; } else {});
-      scope     = { flake = options.self; inputs = allInputs; };
-      imagesDir = options.src + "/images";
-    in
-    if !builtins.pathExists imagesDir then {}
-    else {
-      images = builtins.mapAttrs (name: entry:
-        callFile scope
-          (if entry.type == "directory" then entry.path + "/default.nix" else entry.path)
-          { inherit name; }
-      ) (redTape._internal.scanDir imagesDir);
-    };
+  impl = { options, ... }: {
+    deploy = builtins.mapAttrs (name: entry:
+      import (if entry.type == "directory" then entry.path + "/default.nix" else entry.path)
+    ) options.discovered;
+  };
 }
 ```
 
-Wire it with `extraModules` and `config`:
-
 ```nix
+# flake.nix
 outputs = inputs:
-  let red-tape = inputs.red-tape.lib;
-  in red-tape {
+  let rt = inputs.red-tape.lib;
+  in rt {
     inherit inputs;
-    extraModules = {
-      images = import ./nix/modules/images.nix red-tape.adios;
-    };
-    config = {
-      images = {
-        src         = ./.;
-        flakeInputs = builtins.removeAttrs inputs [ "self" ];
-        self        = inputs.self or null;
-      };
+    extraModules.deploy = import ./nix/modules/deploy.nix {
+      inherit (rt) adios;
+      scanDir = rt._internal.scanDir;
     };
   };
 ```
 
-`config` maps to adios option paths — `config.images` sets `/images` options.
-The module's result (`{ images = { ... }; }`) is merged into the flake outputs
-by `collectAgnostic` since `"images"` is not a known built-in module name.
+If `deploy/` exists, the module produces `deploy.*` in the flake outputs.
+If it doesn't, the module is skipped entirely (discover returns `null`).
 
-### The module contract
+### The descriptor contract
 
-For `collectAgnostic` to pick up a custom module result:
-- Name it anything **other than** `nixpkgs`, `packages`, `devshells`,
-  `formatter`, `checks`, `hosts`, `overlays`, `modules-export`
-- Return a flat attrset from `impl` — it's merged directly with `//` into
-  the top-level flake outputs
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Unique key — also the key in `extraModules` |
+| `discover` | no | `src -> value \| null` — file scanning logic. Absent = always active |
+| `optionsFn` | no | `ctx -> attrset` — wires `discovered` into adios options |
+| `perSystem` | no | `bool`, default `false`. `true` = per-system, transposed |
+| `options` | yes | adios typed option declarations |
+| `impl` | yes | `{ options, inputs, ... } -> attrset` — builds flake outputs |
 
-For per-system custom modules (results transposed across systems):
-- Add `inputs.nixpkgs = { path = "/nixpkgs"; }` to the module
-- Options get `extraScope` from the entry point (which includes `pkgs`, `lib`, etc.)
-- Results flow through `collectPerSystem` if you handle them there, or use
-  `config` to pass options and let `collectAgnostic` merge the result
+The `optionsFn` context (`ctx`) contains:
+`{ discovered, extraScope, agnosticScope, flakeInputs, self }`
+
+Results from `impl`:
+- **System-agnostic** (`perSystem = false`): merged directly into top-level outputs
+- **Per-system** (`perSystem = true`): transposed across systems like packages/checks
+
+You can also pass options via `config` in `mkFlake` — `config.my-module = { ... }`
+maps to `/my-module` adios options and overrides `optionsFn`.

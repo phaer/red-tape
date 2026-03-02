@@ -2,7 +2,8 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) _internal fixtures;
-  inherit (_internal) discover;
+  inherit (_internal) coreDescriptors;
+  discover = src: _internal.discover src coreDescriptors;
 in
 {
   testLibPresent = {

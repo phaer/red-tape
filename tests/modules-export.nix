@@ -2,7 +2,8 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) adios _internal fixtures;
-  inherit (_internal) discover;
+  inherit (_internal) coreDescriptors;
+  discover = src: _internal.discover src coreDescriptors;
 
   evalModulesExport = discoveredModules:
     let
@@ -20,8 +21,8 @@ let
     in
     evaled.modules.modules-export {};
 
-  full = evalModulesExport (discover (fixtures + "/full")).modules;
-  empty = evalModulesExport (discover (fixtures + "/empty")).modules;
+  full = evalModulesExport (discover (fixtures + "/full")).modules-export;
+  empty = evalModulesExport {};
 in
 {
   testOutputKeys = {
