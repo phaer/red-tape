@@ -1,5 +1,9 @@
 # red-tape
 
+> 🚨 **WARNING:** This is vibe-coded slop. The "author" talked to an LLM until
+> something worked. Expect sharp edges, questionable decisions, and
+> documentation that may be more confident than the code deserves.
+
 Convention-based Nix project builder on top of [adios](https://github.com/adisbladis/adios).
 
 Drop `.nix` files in the right directories, get flake outputs with zero boilerplate.
