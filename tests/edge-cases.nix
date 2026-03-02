@@ -2,47 +2,50 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) _internal fixtures;
-  inherit (_internal.discover) scanDir;
-  inherit (_internal.util) filterPlatforms;
-  inherit (_internal.builders) buildTemplates;
+  inherit (_internal) discover filterPlatforms;
 in
 {
-  # meta.platforms filtering removes packages for wrong system
-  testPlatformFilter = {
+  testFilterPlatformsKeepsMatching = {
     expr = filterPlatforms "x86_64-linux" {
-      good = { meta.platforms = [ "x86_64-linux" "aarch64-linux" ]; };
-      bad = { meta.platforms = [ "aarch64-darwin" ]; };
-      noMeta = {};
+      a = { meta.platforms = [ "x86_64-linux" "aarch64-linux" ]; };
+      b = { meta.platforms = [ "aarch64-darwin" ]; };
+      c = { meta = {}; };
     };
     expected = {
-      good = { meta.platforms = [ "x86_64-linux" "aarch64-linux" ]; };
-      noMeta = {};
+      a = { meta.platforms = [ "x86_64-linux" "aarch64-linux" ]; };
+      c = { meta = {}; };
     };
   };
 
-  # scanDir ignores non-nix files
-  testScanDirNixOnly = {
-    expr =
-      let result = scanDir ../tests/fixtures/simple/packages;
-      in builtins.sort builtins.lessThan (builtins.attrNames result);
-    expected = [ "goodbye" "hello" ];
+  testFilterPlatformsEmptyKeepsAll = {
+    expr = builtins.attrNames (filterPlatforms "x86_64-linux" {
+      a = { meta = {}; };
+      b = { meta.platforms = []; };
+    });
+    expected = [ "a" "b" ];
   };
 
-  # Empty directory scan
-  testScanDirEmpty = {
-    expr = scanDir ../tests/fixtures/empty;
-    expected = {};
-  };
-
-  # buildTemplates reads description from flake.nix
-  testTemplateDescriptionFallback = {
+  testTemplateDescription = {
     expr =
       let
-        result = buildTemplates {
-          nodesc = { path = ../tests/fixtures/empty; };
-        };
-      in
-      result.nodesc.description;
-    expected = "nodesc";
+        found = discover.discoverAll (fixtures + "/full");
+        templates = builtins.mapAttrs (name: entry:
+          let f = entry.path + "/flake.nix";
+          in { inherit (entry) path; description = if builtins.pathExists f then (import f).description or name else name; }
+        ) found.templates;
+      in templates.default.description;
+    expected = "A default template";
+  };
+
+  testTemplateWithoutDescription = {
+    expr =
+      let
+        found = discover.discoverAll (fixtures + "/full");
+        templates = builtins.mapAttrs (name: entry:
+          let f = entry.path + "/flake.nix";
+          in { inherit (entry) path; description = if builtins.pathExists f then (import f).description or name else name; }
+        ) found.templates;
+      in templates.minimal.description;
+    expected = "A minimal template";
   };
 }

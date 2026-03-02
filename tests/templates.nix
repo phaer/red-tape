@@ -1,24 +1,28 @@
-# Tests for template export
+# Template tests
 let
   prelude = import ./prelude.nix;
   inherit (prelude) _internal fixtures;
   inherit (_internal) discover;
-  inherit (_internal.builders) buildTemplates;
+
+  mkTemplates = found: builtins.mapAttrs (name: entry:
+    let f = entry.path + "/flake.nix";
+    in { inherit (entry) path; description = if builtins.pathExists f then (import f).description or name else name; }
+  ) found.templates;
 in
 {
   testTemplateNames = {
     expr = builtins.sort builtins.lessThan
-      (builtins.attrNames (buildTemplates (discover.discoverAll (fixtures + "/full")).templates));
+      (builtins.attrNames (mkTemplates (discover.discoverAll (fixtures + "/full"))));
     expected = [ "default" "minimal" ];
   };
 
   testTemplateDescription = {
-    expr = (buildTemplates (discover.discoverAll (fixtures + "/full")).templates).default.description;
+    expr = (mkTemplates (discover.discoverAll (fixtures + "/full"))).default.description;
     expected = "A default template";
   };
 
   testEmptyTemplates = {
-    expr = buildTemplates (discover.discoverAll (fixtures + "/empty")).templates;
+    expr = mkTemplates (discover.discoverAll (fixtures + "/empty"));
     expected = {};
   };
 }

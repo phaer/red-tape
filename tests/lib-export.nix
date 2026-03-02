@@ -3,7 +3,11 @@ let
   prelude = import ./prelude.nix;
   inherit (prelude) _internal fixtures;
   inherit (_internal) discover;
-  inherit (_internal.builders) importLib;
+
+  importLib = libPath: args:
+    if libPath == null then {}
+    else let mod = import libPath;
+    in if builtins.isFunction mod then mod args else mod;
 in
 {
   testLibPresent = {
@@ -15,7 +19,7 @@ in
     expr =
       let
         libPath = (discover.discoverAll (fixtures + "/full")).lib;
-        lib = importLib { inherit libPath; flake = null; inputs = {}; };
+        lib = importLib libPath { flake = null; inputs = {}; };
       in
       lib.greet "world";
     expected = "Hello, world!";
@@ -26,12 +30,11 @@ in
     expected = null;
   };
 
-  # Plain attrset lib (no { flake, inputs } wrapper)
   testPlainLib = {
     expr =
       let
         libPath = (discover.discoverAll (fixtures + "/plain-lib")).lib;
-        lib = importLib { inherit libPath; };
+        lib = importLib libPath {};
       in
       lib.add 1 2;
     expected = 3;

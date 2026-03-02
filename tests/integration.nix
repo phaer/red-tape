@@ -2,39 +2,20 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) mockPkgs sys fixtures _internal;
-  inherit (_internal) discover;
-  inherit (_internal.builders) buildPackages buildDevshells buildChecks buildFormatter buildOverlays;
+  inherit (_internal) discover callFile buildAll filterPlatforms withPrefix;
 
   evalFixture = src:
     let
       found = discover.discoverAll src;
       scope = { pkgs = mockPkgs; system = sys; lib = mockPkgs.lib; };
 
-      pkg = if found.packages != null
-        then buildPackages { discovered = found.packages; inherit scope; system = sys; }
-        else { packages = {}; autoChecks = {}; };
-
-      dev = if found.devshells != null
-        then buildDevshells { discovered = found.devshells; inherit scope; }
-        else { devShells = {}; autoChecks = {}; };
-
-      chk = if found.checks != null
-        then buildChecks { discovered = found.checks; inherit scope; system = sys; }
-        else { checks = {}; };
-
-      fmt = buildFormatter { formatterPath = found.formatter; inherit scope; pkgs = mockPkgs; };
-
-      ovl = if found.overlays != null
-        then buildOverlays { discovered = found.overlays; inherit scope; }
-        else {};
+      packages  = if found.packages  != null then filterPlatforms sys (buildAll scope found.packages)  else {};
+      devShells = if found.devshells  != null then buildAll scope found.devshells  else {};
+      checks    = if found.checks     != null then filterPlatforms sys (buildAll scope found.checks) else {};
+      overlays  = if found.overlays   != null then buildAll { flake = null; inputs = {}; } found.overlays else {};
+      formatter = if found.formatter  != null then callFile scope found.formatter {} else mockPkgs.nixfmt-tree;
     in
-    {
-      inherit (pkg) packages;
-      inherit (dev) devShells;
-      formatter = fmt;
-      checks = chk.checks;
-      overlays = ovl.overlays or {};
-    };
+    { inherit packages devShells checks overlays formatter; };
 in
 {
   testSimplePackageNames = {
@@ -70,19 +51,16 @@ in
     expected = [ "mycheck" ];
   };
 
-  # Overlay names from simple fixture
   testSimpleOverlayNames = {
     expr = builtins.attrNames (evalFixture (fixtures + "/simple")).overlays;
     expected = [ "my-overlay" ];
   };
 
-  # Overlay is a function (final: prev: { ... })
   testOverlayIsFunction = {
     expr = builtins.isFunction (evalFixture (fixtures + "/simple")).overlays.my-overlay;
     expected = true;
   };
 
-  # No overlays in minimal
   testMinimalNoOverlays = {
     expr = (evalFixture (fixtures + "/minimal")).overlays;
     expected = {};

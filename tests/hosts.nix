@@ -5,6 +5,7 @@ let
   inherit (_internal) discover;
   inherit (_internal.builders) buildHosts;
 
+
   fullHosts = (discover.discoverAll (fixtures + "/full")).hosts;
 
   testResult = buildHosts {

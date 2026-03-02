@@ -3,28 +3,123 @@
 # Usage:  outputs = inputs: inputs.red-tape.lib { inherit inputs; };
 { adios-flake }:
 let
-  inherit (builtins) isPath isString mapAttrs;
+  inherit (builtins)
+    addErrorContext all attrNames concatMap elem filter
+    foldl' functionArgs intersectAttrs isAttrs isFunction
+    isPath isString listToAttrs map mapAttrs pathExists readDir;
 
-  # Normalize: accept either a flake input ({ lib.mkFlake = ...; }) or raw { mkFlake }
   adiosFlakeLib = adios-flake.lib or adios-flake;
+  discover = import ./discover.nix;
 
-  # ── Load orthogonal modules ────────────────────────────────────────
-  discover       = import ./discover.nix;
-  inherit (import ./call-file.nix) callFile;
-  util           = import ./util.nix;
-  inherit (util) withPrefix filterPlatforms;
+  # ── Primitives ─────────────────────────────────────────────────────
+  #
+  # Three small, orthogonal tools that the rest is built from:
+  #
+  #   callFile  — import a .nix file, auto-inject from scope
+  #   entryPath — resolve a discovered entry to its .nix path
+  #   buildAll  — callFile over every discovered entry
 
-  buildPackages     = import ./builders/packages.nix    { inherit callFile filterPlatforms withPrefix; };
-  buildDevshells    = import ./builders/devshells.nix    { inherit callFile withPrefix; };
-  buildChecks       = import ./builders/checks.nix       { inherit callFile filterPlatforms; };
-  buildFormatter    = import ./builders/formatter.nix    { inherit callFile; };
-  buildOverlays     = import ./builders/overlays.nix     { inherit callFile; };
-  buildHosts        = import ./builders/hosts.nix        { inherit withPrefix; };
-  buildModules      = import ./builders/modules-export.nix;
-  buildTemplates    = import ./builders/templates.nix;
-  importLib         = import ./builders/lib-export.nix;
+  callFile = scope: path: extra:
+    addErrorContext "while evaluating '${toString path}'" (
+      let fn = import path;
+      in fn (intersectAttrs (functionArgs fn) (scope // extra))
+    );
 
-  # ── Flake entry point ──────────────────────────────────────────────
+  entryPath = entry:
+    if entry.type == "directory" then entry.path + "/default.nix" else entry.path;
+
+  buildAll = scope: discovered:
+    mapAttrs (pname: entry: callFile scope (entryPath entry) { inherit pname; }) discovered;
+
+  withPrefix = prefix: attrs:
+    listToAttrs (map (n: { name = "${prefix}${n}"; value = attrs.${n}; }) (attrNames attrs));
+
+  filterPlatforms = system: attrs:
+    listToAttrs (filter (x: x != null) (map (name:
+      let p = attrs.${name}.meta.platforms or [];
+      in if p == [] || elem system p
+        then { inherit name; value = attrs.${name}; }
+        else null
+    ) (attrNames attrs)));
+
+  # ── Module export ──────────────────────────────────────────────────
+
+  defaultTypeAliases = { nixos = "nixosModules"; darwin = "darwinModules"; home = "homeModules"; };
+
+  buildModules = { discovered, flakeInputs, self, extraTypeAliases ? {} }:
+    let
+      allInputs     = flakeInputs // (if self != null then { inherit self; } else {});
+      publisherArgs = { flake = self; inputs = allInputs; };
+      typeAliases   = defaultTypeAliases // extraTypeAliases;
+
+      expectsPublisherArgs = fn:
+        isFunction fn && (functionArgs fn) != {}
+        && all (a: elem a (attrNames publisherArgs)) (attrNames (functionArgs fn));
+
+      importModule = entry:
+        let path = entryPath entry; mod = import path;
+        in if expectsPublisherArgs mod
+          then { _file = toString path; imports = [ (mod (intersectAttrs (functionArgs mod) publisherArgs)) ]; }
+          else path;
+
+      built = mapAttrs (_: entries: mapAttrs (_: importModule) entries) discovered;
+    in
+    foldl' (acc: t:
+      let alias = typeAliases.${t} or null;
+      in if alias != null && discovered ? ${t}
+        then acc // { ${alias} = built.${t}; }
+        else acc
+    ) {} (attrNames discovered);
+
+  # ── Host configurations ────────────────────────────────────────────
+
+  buildHosts = { discovered, flakeInputs, self }:
+    let
+      allInputs   = flakeInputs // (if self != null then { inherit self; } else {});
+      specialArgs = { flake = self; inputs = allInputs; };
+
+      classMap = { nixos = "nixosConfigurations"; nix-darwin = "darwinConfigurations"; };
+
+      loadHost = name: info:
+        addErrorContext "while building host '${name}' (${info.type})" (
+          if info.type == "custom" then
+            import info.configPath { inherit (specialArgs) flake inputs; hostName = name; }
+          else if info.type == "nixos" then {
+            class = "nixos";
+            value = flakeInputs.nixpkgs.lib.nixosSystem {
+              modules = [ info.configPath ];
+              specialArgs = specialArgs // { hostName = name; };
+            };
+          }
+          else if info.type == "darwin" then
+            let nd = flakeInputs.nix-darwin or (throw "red-tape: host '${name}' needs inputs.nix-darwin");
+            in { class = "nix-darwin"; value = nd.lib.darwinSystem {
+              modules = [ info.configPath ];
+              specialArgs = specialArgs // { hostName = name; };
+            }; }
+          else throw "red-tape: unknown host type '${info.type}' for '${name}'"
+        );
+
+      loaded = mapAttrs loadHost discovered;
+
+      byCategory = cat: listToAttrs (filter (x: x != null) (map (n:
+        let h = loaded.${n};
+        in if (classMap.${h.class} or null) == cat then { name = n; value = h.value; } else null
+      ) (attrNames loaded)));
+
+      result = { nixosConfigurations = byCategory "nixosConfigurations"; darwinConfigurations = byCategory "darwinConfigurations"; };
+
+      autoChecks = system:
+        let go = prefix: hosts: listToAttrs (filter (x: x != null) (map (n:
+              let s = hosts.${n}.config.nixpkgs.hostPlatform.system or null;
+              in if s == system then { name = "${prefix}-${n}"; value = hosts.${n}.config.system.build.toplevel; } else null
+            ) (attrNames hosts)));
+        in go "nixos" result.nixosConfigurations // go "darwin" result.darwinConfigurations;
+    in
+    result // { inherit autoChecks; };
+
+  # ── mkFlake ────────────────────────────────────────────────────────
+
   mkFlake =
     { inputs
     , self ? inputs.self or null
@@ -51,137 +146,90 @@ let
 
       found = discover.discoverAll resolvedSrc;
 
-      # ── Build the scope for per-system callFile ──
+      # ── Scopes ──
       mkScope = pkgs: system: {
         inherit pkgs system;
         lib = pkgs.lib;
         flake = self;
         inputs = allInputs;
         perSystem = mapAttrs (_: input:
-          if builtins.isAttrs input
+          if isAttrs input
           then (input.legacyPackages.${system} or {}) // (input.packages.${system} or {})
           else input
         ) allInputs;
       };
 
-      # ── System-agnostic scope (for overlays) ──
-      agnosticScope = {
-        flake = self;
-        inputs = allInputs;
+      agnosticScope = { flake = self; inputs = allInputs; };
+
+      hasCustomNixpkgs = (nixpkgs.config or {}) != {} || (nixpkgs.overlays or []) != [];
+      customNixpkgsFor = system: import inputs.nixpkgs {
+        inherit system; config = nixpkgs.config or {}; overlays = nixpkgs.overlays or [];
       };
 
-      # ── Resolve nixpkgs with optional config/overlays ──
-      hasCustomNixpkgs =
-        (nixpkgs.config or {}) != {} || (nixpkgs.overlays or []) != [];
-
-      customNixpkgsFor = system:
-        import inputs.nixpkgs {
-          inherit system;
-          config = nixpkgs.config or {};
-          overlays = nixpkgs.overlays or [];
-        };
-
-      # ── Per-system builder: produces the adios-flake perSystem result ──
+      # ── Per-system ──
       perSystemFromDiscovery = { pkgs, system, ... }:
         let
-          effectivePkgs = if hasCustomNixpkgs then customNixpkgsFor system else pkgs;
-          scope = mkScope effectivePkgs system;
+          p = if hasCustomNixpkgs then customNixpkgsFor system else pkgs;
+          scope = mkScope p system;
 
-          pkg = if found.packages != null
-            then buildPackages { discovered = found.packages; inherit scope system; }
-            else { packages = {}; autoChecks = {}; };
+          packages  = if found.packages  != null then filterPlatforms system (buildAll scope found.packages)  else {};
+          devShells = if found.devshells  != null then buildAll scope found.devshells  else {};
+          checks    = if found.checks     != null then filterPlatforms system (buildAll scope found.checks) else {};
+          formatter = if found.formatter  != null then callFile scope found.formatter {} else p.nixfmt-tree or p.nixfmt
+            or (throw "red-tape: no formatter.nix and nixfmt-tree unavailable");
 
-          dev = if found.devshells != null
-            then buildDevshells { discovered = found.devshells; inherit scope; }
-            else { devShells = {}; autoChecks = {}; };
-
-          chk = if found.checks != null
-            then buildChecks { discovered = found.checks; inherit scope system; }
-            else { checks = {}; };
-
-          fmt = buildFormatter {
-            formatterPath = found.formatter;
-            inherit scope;
-            pkgs = effectivePkgs;
-          };
-
-          # Merge auto-checks (packages, devshells) with user-defined checks.
-          # User checks take precedence.
-          allChecks = pkg.autoChecks // dev.autoChecks // chk.checks;
-        in
-        {
-          inherit (pkg) packages;
-          inherit (dev) devShells;
-          formatter = fmt;
-          checks = allChecks;
+          # Auto-checks: packages + passthru.tests + devshells
+          pkgChecks = withPrefix "pkgs-" packages
+            // listToAttrs (concatMap (pname:
+              let tests = filterPlatforms system (packages.${pname}.passthru.tests or {});
+              in map (t: { name = "pkgs-${pname}-${t}"; value = tests.${t}; }) (attrNames tests)
+            ) (attrNames packages));
+        in {
+          inherit packages devShells formatter;
+          checks = pkgChecks // withPrefix "devshell-" devShells // checks;
         };
 
-      # ── Compose the perSystem function ──
-      # If user provided a perSystem, merge its results with discovery.
       composedPerSystem =
-        if perSystem != null then
-          args:
-            let
-              disc = perSystemFromDiscovery args;
-              user = perSystem args;
-            in
-            disc // user // {
-              # Deep-merge attrset categories so user additions don't clobber discovery
-              packages  = disc.packages  // (user.packages or {});
-              devShells = disc.devShells // (user.devShells or {});
-              checks    = disc.checks    // (user.checks or {});
-            }
-        else
-          perSystemFromDiscovery;
+        if perSystem != null then args:
+          let d = perSystemFromDiscovery args; u = perSystem args;
+          in d // u // {
+            packages  = d.packages  // (u.packages or {});
+            devShells = d.devShells // (u.devShells or {});
+            checks    = d.checks    // (u.checks or {});
+          }
+        else perSystemFromDiscovery;
 
-      # ── System-agnostic outputs ──
-      ovl = if found.overlays != null
-        then buildOverlays { discovered = found.overlays; scope = agnosticScope; }
-        else {};
+      # ── System-agnostic ──
+      overlays  = if found.overlays != null then { overlays = buildAll agnosticScope found.overlays; } else {};
+      hosts     = if found.hosts    != null then buildHosts { discovered = found.hosts; inherit flakeInputs self; } else {};
+      modExport = if found.modules  != null then buildModules { discovered = found.modules; inherit flakeInputs self; extraTypeAliases = moduleTypeAliases; } else {};
 
-      hosts = if found.hosts != null
-        then buildHosts { discovered = found.hosts; inherit flakeInputs self; }
-        else {};
+      templates = let t = mapAttrs (name: entry:
+          let f = entry.path + "/flake.nix";
+          in { inherit (entry) path; description = if pathExists f then (import f).description or name else name; }
+        ) found.templates;
+        in if t != {} then { inherit templates; } else {};
 
-      modExport = if found.modules != null
-        then buildModules { discovered = found.modules; inherit flakeInputs self; extraTypeAliases = moduleTypeAliases; }
-        else {};
-
-      templates = let t = buildTemplates found.templates;
-        in if t != {} then { templates = t; } else {};
-
-      libExport = let l = importLib { libPath = found.lib; flake = self; inputs = allInputs; };
+      libExport = let l =
+          if found.lib == null then {}
+          else let mod = import found.lib;
+          in if isFunction mod then mod { flake = self; inputs = allInputs; } else mod;
         in if l != {} then { lib = l; } else {};
 
-      # ── Compose the flake parameter ──
-      # Merge system-agnostic outputs from discovery with user-provided flake attrs.
       discoveredFlake =
-        (builtins.removeAttrs ovl [ "autoChecks" ])
-        // (builtins.removeAttrs hosts [ "autoChecks" ])
-        // modExport
-        // templates
-        // libExport;
+        overlays // (builtins.removeAttrs hosts [ "autoChecks" ])
+        // modExport // templates // libExport;
 
       composedFlake =
-        if builtins.isFunction flake then
-          { withSystem }:
-            let userFlake = flake { inherit withSystem; };
-            in discoveredFlake // userFlake
-        else
-          discoveredFlake // flake;
+        if isFunction flake then { withSystem }:
+          discoveredFlake // flake { inherit withSystem; }
+        else discoveredFlake // flake;
 
-      # ── Host auto-checks need to be wired into perSystem ──
-      # Hosts are system-agnostic but their checks are per-system.
       hostAutoChecks = if found.hosts != null then hosts.autoChecks else (_: {});
 
       finalPerSystem = args @ { pkgs, system, ... }:
-        let
-          base = composedPerSystem args;
-          hChecks = hostAutoChecks system;
-        in
-        base // {
-          checks = hChecks // base.checks;
-        };
+        let base = composedPerSystem args;
+        in base // { checks = hostAutoChecks system // base.checks; };
 
     in
     adiosFlakeLib.mkFlake {
@@ -193,13 +241,8 @@ let
 in
 {
   inherit mkFlake;
-
-  # Exposed for tests and contrib modules
   _internal = {
-    inherit discover callFile util;
-    builders = {
-      inherit buildPackages buildDevshells buildChecks buildFormatter
-              buildOverlays buildHosts buildModules buildTemplates importLib;
-    };
+    inherit discover callFile buildAll entryPath withPrefix filterPlatforms;
+    builders = { inherit buildModules buildHosts; };
   };
 }
