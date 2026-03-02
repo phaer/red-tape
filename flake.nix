@@ -7,7 +7,7 @@
 
   outputs = { adios-flake, ... }:
     let
-      imported = import ./. { inherit adios-flake; };
+      imported = import ./nix { inherit adios-flake; };
     in
     {
       lib = imported // {

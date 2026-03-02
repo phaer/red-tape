@@ -10,7 +10,7 @@
 #     in rt {
 #       inherit inputs;
 #       modules = [
-#         (import (inputs.red-tape + "/contrib/system-manager.nix") {
+#         (import (inputs.red-tape.outPath + "/contrib/system-manager.nix") {
 #           inherit inputs;
 #           src = inputs.self;
 #           scanHosts = rt._internal.discover.scanHosts;
