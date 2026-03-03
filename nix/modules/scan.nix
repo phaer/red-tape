@@ -1,10 +1,12 @@
 # red-tape/scan — Pure filesystem discovery + shared flake context
 #
 # Options:
-#   src    — Source path to scan (typically `self`)
-#   prefix — Optional subdirectory prefix
-#   self   — The flake self (path-like, for threading as `flake` into user exprs)
-#   inputs — All flake inputs
+#   src            — Source path to scan (typically `self`)
+#   prefix         — Optional subdirectory prefix
+#   self           — The flake self (path-like, for threading as `flake` into user exprs)
+#   inputs         — All flake inputs
+#   extraHostTypes — Extra host sentinel descriptors appended to coreHostTypes
+#                    e.g. [ { type = "nix-on-droid"; file = "droid-configuration.nix"; } ]
 #
 # Result: { discovered, src, self, allInputs }
 #   discovered — the full discoverAll attrset
@@ -14,7 +16,7 @@
 { discover }:
 
 let
-  inherit (builtins) isPath removeAttrs;
+  inherit (builtins) isPath isList removeAttrs;
 in
 {
   name = "scan";
@@ -47,6 +49,10 @@ in
       type = { name = "attrs"; verify = v: if builtins.isAttrs v then null else "expected attrset"; };
       default = {};
     };
+    extraHostTypes = {
+      type = { name = "list"; verify = v: if isList v then null else "expected a list"; };
+      default = [];
+    };
   };
   impl = { options, ... }:
     let
@@ -59,9 +65,12 @@ in
         else src;
       allInputs = (removeAttrs options.inputs [ "self" ])
         // (if self != null then { inherit self; } else {});
+      hostTypes = discover.coreHostTypes ++ options.extraHostTypes;
     in
     {
-      discovered = discover.discoverAll resolvedSrc;
+      discovered = discover.discoverAll resolvedSrc // {
+        hosts = discover.scanHosts (resolvedSrc + "/hosts") hostTypes;
+      };
       inherit src self allInputs;
     };
 }
