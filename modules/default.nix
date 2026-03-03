@@ -4,8 +4,7 @@
 # results so adios-flake's _collector/_flake can route them.
 let
   strip = m: builtins.removeAttrs m [ "name" ];
-in
-{
+
   default = {
     name = "red-tape";
     inputs = {
@@ -51,5 +50,13 @@ in
       templates = strip (import ./templates.nix);
       lib = strip (import ./lib.nix);
     };
+  };
+in
+{
+  redTape = builtins.removeAttrs default.modules [ "modules" ] // {
+    inherit default;
+    home-manager = import ../contrib/home-manager.nix;
+    darwin = import ../contrib/darwin.nix;
+    system-manager = import ../contrib/system-manager.nix;
   };
 }

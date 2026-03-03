@@ -16,7 +16,7 @@ let
     let
       rootDef = {
         modules = {
-          "red-tape" = builtins.removeAttrs redTape.modules.default [ "name" ];
+          "red-tape" = builtins.removeAttrs redTape.modules.redTape.default [ "name" ];
           nixpkgs = {
             options = {
               system = {

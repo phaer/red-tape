@@ -28,7 +28,7 @@ let
         perSystem
         flake
         ;
-      modules = [ defaultModules.default ] ++ modules;
+      modules = [ defaultModules.redTape.default ] ++ modules;
       config = {
         "red-tape/scan" = {
           inherit src self;
