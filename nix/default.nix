@@ -166,7 +166,7 @@ let
         in check "nixos" nixos // check "darwin" darwin;
 
       # Inject host auto-checks into per-system checks
-      finalPerSystem = args @ { system, ... }:
+      finalPerSystem = args @ { pkgs, system, ... }:
         let base = composedPerSystem args;
         in base // { checks = hostAutoChecks system // base.checks; };
 
