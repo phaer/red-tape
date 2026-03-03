@@ -27,6 +27,9 @@ in
       modules = {
         path = "./modules";
       };
+      templates = {
+        path = "./templates";
+      };
     };
     impl =
       { results, ... }:
@@ -42,6 +45,7 @@ in
       checks = strip (import ./checks.nix);
       hosts = strip (import ./hosts.nix);
       modules = strip (import ./modules.nix);
+      templates = strip (import ./templates.nix);
     };
   };
 }
