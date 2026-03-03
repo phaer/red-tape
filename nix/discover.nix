@@ -54,14 +54,21 @@ let
 
   optional = path: let v = scanDir path; in if v == {} then {} else v;
 
+  # scanDir skips bare default.nix in the scanned directory itself.
+  # optionalDefault adds it back as the "default" entry when present.
+  optionalDefault = path:
+    if pathExists (path + "/default.nix")
+    then { default = { path = path + "/default.nix"; type = "file"; }; }
+    else {};
+
   optionalSingle = path: name:
     if pathExists path then { ${name} = { inherit path; type = "file"; }; } else {};
 
   discoverAll = src: {
-    packages  = optional (src + "/packages")  // optionalSingle (src + "/package.nix") "default";
-    devshells = optional (src + "/devshells")  // optionalSingle (src + "/devshell.nix") "default";
-    checks    = optional (src + "/checks");
-    overlays  = optional (src + "/overlays")   // optionalSingle (src + "/overlay.nix") "default";
+    packages  = optionalDefault (src + "/packages") // optional (src + "/packages") // optionalSingle (src + "/package.nix") "default";
+    devshells = optionalDefault (src + "/devshells") // optional (src + "/devshells") // optionalSingle (src + "/devshell.nix") "default";
+    checks    = optionalDefault (src + "/checks") // optional (src + "/checks");
+    overlays  = optionalDefault (src + "/overlays") // optional (src + "/overlays") // optionalSingle (src + "/overlay.nix") "default";
     hosts     = scanHosts (src + "/hosts") coreHostTypes;
     formatter = if pathExists (src + "/formatter.nix") then src + "/formatter.nix" else null;
     templates = if !pathExists (src + "/templates") then {}
