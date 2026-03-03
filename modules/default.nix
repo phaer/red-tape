@@ -15,6 +15,9 @@ in
       devshells = {
         path = "./devshells";
       };
+      formatter = {
+        path = "./formatter";
+      };
     };
     impl =
       { results, ... }:
@@ -26,6 +29,7 @@ in
       scope = strip (import ./scope.nix);
       packages = strip (import ./packages.nix);
       devshells = strip (import ./devshells.nix);
+      formatter = strip (import ./formatter.nix);
     };
   };
 }
