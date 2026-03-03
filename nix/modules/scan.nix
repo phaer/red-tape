@@ -25,9 +25,9 @@ in
       type = {
         name = "path-like";
         verify = v:
-          if isPath v || (builtins.isAttrs v && v ? outPath) || builtins.isString v
+          if isPath v || builtins.isString v
           then null
-          else "expected a path, string, or attrset with outPath";
+          else "expected a path or string";
       };
     };
     prefix = {
