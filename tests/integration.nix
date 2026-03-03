@@ -8,7 +8,12 @@ let
     discover
     helpers
     ;
-  inherit (helpers) callFile buildAll filterPlatforms;
+  inherit (helpers)
+    callFile
+    buildAll
+    filterPlatforms
+    withPrefix
+    ;
 
   sort = builtins.sort builtins.lessThan;
   names = builtins.attrNames;
@@ -23,9 +28,18 @@ let
         lib = mockPkgs.lib;
       };
       packages = filterPlatforms sys (buildAll scope found.packages);
+      devShells = buildAll scope found.devshells;
+      checks = filterPlatforms sys (buildAll scope found.checks);
+      formatter =
+        if found.formatter != null then callFile scope found.formatter { } else mockPkgs.nixfmt-tree;
     in
     {
-      inherit packages;
+      inherit
+        packages
+        devShells
+        checks
+        formatter
+        ;
     };
 
   full = evalFixture (fixtures + "/full");
@@ -55,11 +69,7 @@ in
   testPlatformFilterKeeps = {
     expr =
       let
-        scope = {
-          pkgs = mockPkgs;
-          system = sys;
-          lib = mockPkgs.lib;
-        };
+
         pkg = {
           type = "derivation";
           name = "kept";
@@ -81,5 +91,57 @@ in
       in
       names (filterPlatforms sys { dropped = pkg; });
     expected = [ ];
+  };
+
+  # --- DevShells ---
+
+  testFullDevshellNames = {
+    expr = sort (names full.devShells);
+    expected = [
+      "backend"
+      "default"
+    ];
+  };
+
+  testDevshellType = {
+    expr = full.devShells.default.type;
+    expected = "devshell";
+  };
+
+  # --- Formatter ---
+
+  testFullFormatter = {
+    expr = full.formatter != null;
+    expected = true;
+  };
+
+  testFormatterFallback = {
+    expr = minimal.formatter.name;
+    expected = "nixfmt-tree";
+  };
+
+  # --- Checks ---
+
+  testFullCheckNames = {
+    expr = sort (names full.checks);
+    expected = [ "mycheck" ];
+  };
+
+  # --- Auto-checks ---
+
+  testAutoCheckPackagePrefix = {
+    expr = sort (names (withPrefix "pkgs-" full.packages));
+    expected = [
+      "pkgs-goodbye"
+      "pkgs-hello"
+    ];
+  };
+
+  testAutoCheckDevshellPrefix = {
+    expr = sort (names (withPrefix "devshell-" full.devShells));
+    expected = [
+      "devshell-backend"
+      "devshell-default"
+    ];
   };
 }
