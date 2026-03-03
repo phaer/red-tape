@@ -21,6 +21,9 @@ in
       checks = {
         path = "./checks";
       };
+      hosts = {
+        path = "./hosts";
+      };
     };
     impl =
       { results, ... }:
@@ -34,6 +37,7 @@ in
       devshells = strip (import ./devshells.nix);
       formatter = strip (import ./formatter.nix);
       checks = strip (import ./checks.nix);
+      hosts = strip (import ./hosts.nix);
     };
   };
 }
