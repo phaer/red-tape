@@ -12,6 +12,9 @@ in
       packages = {
         path = "./packages";
       };
+      devshells = {
+        path = "./devshells";
+      };
     };
     impl =
       { results, ... }:
@@ -22,6 +25,7 @@ in
       scan = strip (import ./scan.nix { discover = import ../lib/discover.nix; });
       scope = strip (import ./scope.nix);
       packages = strip (import ./packages.nix);
+      devshells = strip (import ./devshells.nix);
     };
   };
 }
