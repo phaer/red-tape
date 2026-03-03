@@ -1,6 +1,6 @@
 # Test prelude — shared setup for all test files
 let
-  adios-flake = builtins.getFlake "github:Mic92/adios-flake";
+  adios-flake = builtins.getFlake "github:phaer/adios-flake/flake-outputs";
   redTape = import ../nix { inherit adios-flake; };
 
   lib = import <nixpkgs/lib>;

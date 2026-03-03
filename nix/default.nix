@@ -1,8 +1,7 @@
 # red-tape — Convention-based Nix project builder on adios-flake
 #
 # Primary API:
-#   red-tape.lib.module { src = self; ... }       — adios-flake module (per-system)
-#   red-tape.lib.flakeOutputs { src = self; ... }  — system-agnostic flake outputs
+#   red-tape.lib.module { src = self; ... }       — adios-flake module (per-system + flake)
 #
 # Convenience:
 #   red-tape.mkFlake { inherit inputs; }           — full flake via mkFlake wrapper
@@ -108,13 +107,18 @@ let
     in
     { nixosConfigurations = nixos; darwinConfigurations = darwin; inherit autoChecks; };
 
-  # ── Public API: adios-flake module (per-system) ────────────────────
+  # ── Public API: adios-flake module ─────────────────────────────────
+  #
+  # Returns a function suitable for use in adios-flake's `modules` list.
+  # Discovers all convention-based outputs (packages/, devshells/, checks/,
+  # hosts/, modules/, overlays/, templates/, lib/) and returns them as a
+  # single attrset. adios-flake's /_collector and /_flake handle routing
+  # per-system vs flake-scoped keys automatically.
 
-  module = import ./module.nix { inherit discover callFile buildAll filterPlatforms withPrefix; };
-
-  # ── Public API: flake-level outputs (system-agnostic) ──────────────
-
-  flakeOutputs = import ./flake-outputs.nix { inherit discover buildAll buildModules buildHosts; };
+  module = import ./module.nix {
+    inherit discover callFile buildAll filterPlatforms withPrefix
+            buildModules buildHosts;
+  };
 
   # ── Convenience: mkFlake wrapper ───────────────────────────────────
 
@@ -132,52 +136,23 @@ let
     , moduleTypeAliases ? {}
     }:
     let
-      flakeInputs = builtins.removeAttrs inputs [ "self" ];
-
-      # Per-system: red-tape module + optional user perSystem
-      redTapeModule = module { inherit src nixpkgs prefix inputs self; };
-
-      composedPerSystem =
-        if perSystem == null then redTapeModule
-        else args:
-          let d = redTapeModule args; u = perSystem args;
-          in d // u // {
-            packages  = d.packages  // (u.packages or {});
-            devShells = d.devShells // (u.devShells or {});
-            checks    = d.checks    // (u.checks or {});
-          };
-
-      # Flake-level: red-tape outputs + optional user flake
-      redTapeFlake = flakeOutputs { inherit src inputs self prefix moduleTypeAliases; };
-
-      composedFlake =
-        if isFunction flake then { withSystem }: redTapeFlake // flake { inherit withSystem; }
-        else redTapeFlake // flake;
-
-      # Host auto-checks from nixos/darwin configurations in flake outputs
-      nixos = redTapeFlake.nixosConfigurations or {};
-      darwin = redTapeFlake.darwinConfigurations or {};
-      hostAutoChecks = system:
-        let check = pre: cfgs: builtins.listToAttrs (builtins.filter (x: x != null) (builtins.map (n:
-              let s = cfgs.${n}.config.nixpkgs.hostPlatform.system or null;
-              in if s == system then { name = "${pre}-${n}"; value = cfgs.${n}.config.system.build.toplevel; } else null
-            ) (builtins.attrNames cfgs)));
-        in check "nixos" nixos // check "darwin" darwin;
-
-      # Inject host auto-checks into per-system checks
-      finalPerSystem = args @ { pkgs, system, ... }:
-        let base = composedPerSystem args;
-        in base // { checks = hostAutoChecks system // base.checks; };
+      # red-tape's unified module: discovers everything, returns both
+      # per-system keys and flake-scoped keys in one attrset
+      redTapeModule = module {
+        inherit src nixpkgs prefix inputs self;
+        moduleTypeAliases = moduleTypeAliases;
+      };
 
     in
     adiosFlakeLib.mkFlake {
-      inherit inputs self systems config modules;
-      perSystem = finalPerSystem;
-      flake = composedFlake;
+      inherit inputs self systems config;
+      modules = [ redTapeModule ] ++ modules;
+      perSystem = perSystem;
+      flake = flake;
     };
 
 in {
-  inherit mkFlake module flakeOutputs;
+  inherit mkFlake module;
   _internal = {
     inherit discover callFile buildAll entryPath withPrefix filterPlatforms;
     builders = { inherit buildModules buildHosts; };

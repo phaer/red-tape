@@ -3,7 +3,7 @@ let
   prelude = import ./prelude.nix;
   inherit (prelude) mockPkgs sys fixtures;
 
-  adios-flake = builtins.getFlake "github:Mic92/adios-flake";
+  adios-flake = builtins.getFlake "github:phaer/adios-flake/flake-outputs";
   redTape = import ../nix { inherit adios-flake; };
 
   # Test: module produces per-system outputs from simple fixture

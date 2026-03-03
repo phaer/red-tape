@@ -30,14 +30,14 @@ via adios-flake modules. ~380 lines of library code.
 ### À la carte: use as an adios-flake module
 
 If you already use adios-flake or want fine-grained control, import
-red-tape's module and flake outputs individually:
+red-tape's module directly:
 
 ```nix
 # flake.nix
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    adios-flake.url = "github:Mic92/adios-flake";
+    adios-flake.url = "github:phaer/adios-flake";
     red-tape.url = "github:phaer/red-tape";
   };
 
@@ -46,15 +46,13 @@ red-tape's module and flake outputs individually:
       inherit inputs self;
       systems = [ "x86_64-linux" "aarch64-darwin" ];
 
-      # red-tape discovers packages/, devshells/, checks/, formatter.nix
+      # red-tape discovers everything: packages/, devshells/, checks/,
+      # formatter.nix, hosts/, modules/, overlays/, templates/, lib/
       modules = [
         (red-tape.lib.module { src = self; inherit inputs self; })
       ];
 
-      # red-tape discovers hosts/, modules/, overlays/, templates/, lib/
-      flake = red-tape.lib.flakeOutputs { src = self; inherit inputs self; };
-
-      # Mix in your own per-system outputs alongside red-tape's
+      # Mix in your own outputs alongside red-tape's
       perSystem = { pkgs, ... }: {
         packages.extra = pkgs.cowsay;
       };
@@ -62,14 +60,14 @@ red-tape's module and flake outputs individually:
 }
 ```
 
-`red-tape.lib.module` returns an adios-flake module function, so it
-composes naturally with other modules. `red-tape.lib.flakeOutputs`
-returns a plain attrset of system-agnostic outputs.
+`red-tape.lib.module` returns a single adios-flake module that produces
+both per-system outputs (packages, devShells, checks, formatter) and
+flake-scoped outputs (nixosConfigurations, nixosModules, overlays, etc.).
+adios-flake routes them automatically via `/_collector` and `/_flake`.
 
-Note: in à-la-carte mode, host auto-checks (building `system.build.toplevel`
-for each `nixosConfigurations`/`darwinConfigurations` entry) are not
-automatically injected into per-system checks. The all-in-one wrapper
-handles this for you.
+Host auto-checks (building `system.build.toplevel` for each
+`nixosConfigurations`/`darwinConfigurations` entry) are automatically
+injected into per-system checks.
 
 ```
 my-project/

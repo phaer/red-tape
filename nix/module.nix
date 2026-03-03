@@ -1,11 +1,14 @@
-# red-tape adios-flake module — per-system discovery
+# red-tape adios-flake module — unified discovery
 #
 # Usage:
 #   modules = [ (red-tape.lib.module { src = self; }) ];
 #
-# Discovers packages/, devshells/, checks/, formatter.nix and wires them
-# into the per-system outputs that adios-flake expects.
-{ discover, callFile, buildAll, filterPlatforms, withPrefix }:
+# Discovers packages/, devshells/, checks/, formatter.nix (per-system)
+# and hosts/, modules/, overlays/, templates/, lib/ (flake-scoped).
+# adios-flake routes keys to /_collector or /_flake automatically.
+{ discover, callFile, buildAll, filterPlatforms, withPrefix
+, buildModules, buildHosts
+}:
 
 {
   src,
@@ -13,11 +16,12 @@
   prefix ? null,
   inputs ? {},
   self ? null,
+  moduleTypeAliases ? {},
 }:
 let
   inherit (builtins)
-    attrNames concatMap elem filter isPath
-    listToAttrs map mapAttrs pathExists;
+    attrNames concatMap elem filter isAttrs isFunction isPath
+    listToAttrs map mapAttrs pathExists removeAttrs;
 
   resolvedSrc =
     if prefix != null then
@@ -26,11 +30,35 @@ let
 
   found = discover.discoverAll resolvedSrc;
 
-  allInputs = (builtins.removeAttrs inputs [ "self" ])
+  allInputs = (removeAttrs inputs [ "self" ])
     // (if self != null then { inherit self; } else {});
 
   hasCustomNixpkgs = (nixpkgs.config or {}) != {} || (nixpkgs.overlays or []) != [];
+
+  # ── Flake-scoped outputs (computed once, no pkgs needed) ─────────
+
+  agnostic = { flake = self; inputs = allInputs; };
+
+  hosts = if found.hosts != {} then buildHosts { discovered = found.hosts; inherit allInputs self; } else {};
+
+  flakeResult =
+    (if found.overlays != {} then { overlays = buildAll agnostic found.overlays; } else {})
+    // (removeAttrs hosts [ "autoChecks" ])
+    // (if found.modules != {} then buildModules {
+        discovered = found.modules; inherit allInputs self;
+        extraTypeAliases = moduleTypeAliases;
+      } else {})
+    // (let t = mapAttrs (name: e: { inherit (e) path; description =
+          let f = e.path + "/flake.nix"; in if pathExists f then (import f).description or name else name;
+        }) found.templates; in if t != {} then { templates = t; } else {})
+    // (let l = if found.lib == null then {} else let m = import found.lib;
+          in if isFunction m then m { flake = self; inputs = allInputs; } else m;
+        in if l != {} then { lib = l; } else {});
+
 in
+# The returned function is an adios-flake ergonomic module.
+# It receives per-system args and returns both per-system and flake-scoped
+# keys. adios-flake routes them via /_collector and /_flake respectively.
 { pkgs, system, ... }:
 let
   p = if hasCustomNixpkgs
@@ -46,7 +74,7 @@ let
     flake = self;
     inputs = allInputs;
     perSystem = mapAttrs (_: i:
-      if builtins.isAttrs i then (i.legacyPackages.${system} or {}) // (i.packages.${system} or {}) else i
+      if isAttrs i then (i.legacyPackages.${system} or {}) // (i.packages.${system} or {}) else i
     ) allInputs;
   };
 
@@ -57,13 +85,21 @@ let
   formatter = if found.formatter != null then callFile scope found.formatter {}
     else p.nixfmt-tree or p.nixfmt or (throw "red-tape: no formatter.nix and nixfmt-tree unavailable");
 
+  # Host auto-checks: build system.build.toplevel for matching hosts
+  hostAutoChecks =
+    let ac = hosts.autoChecks or null;
+    in if ac != null then ac system else {};
+
   pkgChecks = withPrefix "pkgs-" packages
     // listToAttrs (concatMap (pname:
       let tests = filterPlatforms system (packages.${pname}.passthru.tests or {});
       in map (t: { name = "pkgs-${pname}-${t}"; value = tests.${t}; }) (attrNames tests)
     ) (attrNames packages));
 in
+# Per-system keys
 {
   inherit packages devShells formatter;
-  checks = pkgChecks // withPrefix "devshell-" devShells // checks;
+  checks = hostAutoChecks // pkgChecks // withPrefix "devshell-" devShells // checks;
 }
+# Flake-scoped keys (routed to /_flake by adios-flake)
+// flakeResult
