@@ -24,6 +24,9 @@ in
       hosts = {
         path = "./hosts";
       };
+      modules = {
+        path = "./modules";
+      };
     };
     impl =
       { results, ... }:
@@ -38,6 +41,7 @@ in
       formatter = strip (import ./formatter.nix);
       checks = strip (import ./checks.nix);
       hosts = strip (import ./hosts.nix);
+      modules = strip (import ./modules.nix);
     };
   };
 }
