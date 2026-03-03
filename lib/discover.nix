@@ -9,7 +9,6 @@
 #   ├── checks/{name}.nix
 #   ├── overlays/{name}.nix | overlay.nix
 #   ├── hosts/{name}/configuration.nix  (nixos)
-#   │               /darwin-configuration.nix  (darwin)
 #   │               /default.nix  (custom)
 #   ├── modules/{type}/{name}.nix
 #   ├── templates/{name}/flake.nix
@@ -79,7 +78,58 @@ let
       in
       dirs // files;
 
+  # ── Derived scanners ───────────────────────────────────────────────
+
+  # Like scanDir but for hosts: walks subdirs looking for sentinel files
+  # (e.g. configuration.nix) to determine host type.
+  # Returns { name = { type; configPath; hostPath; }; ... }.
+  scanHosts =
+    path: hostTypes:
+    if !pathExists path then
+      { }
+    else
+      let
+        entries = readDir path;
+      in
+      listToAttrs (
+        filter (x: x != null) (
+          map (
+            name:
+            if entries.${name} != "directory" then
+              null
+            else
+              let
+                hostPath = path + "/${name}";
+                hits = filter (t: pathExists (hostPath + "/${t.file}")) hostTypes;
+              in
+              if hits == [ ] then
+                null
+              else
+                {
+                  inherit name;
+                  value = {
+                    type = (head hits).type;
+                    configPath = hostPath + "/${(head hits).file}";
+                    inherit hostPath;
+                  };
+                }
+          ) (attrNames entries)
+        )
+      );
+
+  # Host type sentinels — checked in order, first match wins.
+  coreHostTypes = [
+    {
+      type = "custom";
+      file = "default.nix";
+    }
+    {
+      type = "nixos";
+      file = "configuration.nix";
+    }
+  ];
+
 in
 {
-  inherit scanDir;
+  inherit scanDir scanHosts coreHostTypes;
 }
