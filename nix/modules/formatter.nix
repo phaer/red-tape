@@ -2,8 +2,15 @@
 #
 # Inputs: ../scan, ../scope
 # Result: { formatter = derivation; }
-{ callFile }:
+let
+  inherit (builtins) addErrorContext functionArgs intersectAttrs;
 
+  callFile = scope: path: extra:
+    addErrorContext "while evaluating '${toString path}'" (
+      let fn = import path;
+      in fn (intersectAttrs (functionArgs fn) (scope // extra))
+    );
+in
 {
   name = "formatter";
   inputs = {
