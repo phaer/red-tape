@@ -1,6 +1,11 @@
 # red-tape — Convention-based Nix project builder on adios-flake
 #
-# Usage:  outputs = inputs: inputs.red-tape.lib { inherit inputs; };
+# Primary API:
+#   red-tape.lib.module { src = self; ... }       — adios-flake module (per-system)
+#   red-tape.lib.flakeOutputs { src = self; ... }  — system-agnostic flake outputs
+#
+# Convenience:
+#   red-tape.lib { inherit inputs; }              — full flake via mkFlake wrapper
 { adios-flake }:
 let
   inherit (builtins)
@@ -12,12 +17,6 @@ let
   discover = import ./discover.nix;
 
   # ── Primitives ─────────────────────────────────────────────────────
-  #
-  #   callFile      — import a .nix file, auto-inject from scope
-  #   entryPath     — resolve a discovered entry to its .nix path
-  #   buildAll      — callFile over every discovered entry
-  #   withPrefix    — prefix all keys in an attrset
-  #   filterPlatforms — keep only derivations matching system
 
   callFile = scope: path: extra:
     addErrorContext "while evaluating '${toString path}'" (
@@ -36,10 +35,6 @@ let
       let p = a.${n}.meta.platforms or [];
       in if p == [] || elem system p then { name = n; value = a.${n}; } else null
     ) (attrNames a)));
-
-  # Merge inputs, adding self if present.
-  mkAllInputs = flakeInputs: self:
-    flakeInputs // (if self != null then { inherit self; } else {});
 
   # ── Module export ──────────────────────────────────────────────────
 
@@ -113,7 +108,15 @@ let
     in
     { nixosConfigurations = nixos; darwinConfigurations = darwin; inherit autoChecks; };
 
-  # ── mkFlake ────────────────────────────────────────────────────────
+  # ── Public API: adios-flake module (per-system) ────────────────────
+
+  module = import ./module.nix { inherit discover callFile buildAll filterPlatforms withPrefix; };
+
+  # ── Public API: flake-level outputs (system-agnostic) ──────────────
+
+  flakeOutputs = import ./flake-outputs.nix { inherit discover buildAll buildModules buildHosts; };
+
+  # ── Convenience: mkFlake wrapper ───────────────────────────────────
 
   mkFlake =
     { inputs
@@ -130,82 +133,40 @@ let
     }:
     let
       flakeInputs = builtins.removeAttrs inputs [ "self" ];
-      allInputs = mkAllInputs flakeInputs self;
+      allInputs = flakeInputs // (if self != null then { inherit self; } else {});
 
-      resolvedSrc =
-        if prefix != null then
-          (if isPath prefix then prefix else src + "/${prefix}")
-        else src;
-
-      found = discover.discoverAll resolvedSrc;
-
-      mkScope = pkgs: system: {
-        inherit pkgs system;
-        lib = pkgs.lib;
-        flake = self;
-        inputs = allInputs;
-        perSystem = mapAttrs (_: i:
-          if isAttrs i then (i.legacyPackages.${system} or {}) // (i.packages.${system} or {}) else i
-        ) allInputs;
-      };
-
-      hasCustomNixpkgs = (nixpkgs.config or {}) != {} || (nixpkgs.overlays or []) != [];
-      customNixpkgsFor = system: import inputs.nixpkgs {
-        inherit system; config = nixpkgs.config or {}; overlays = nixpkgs.overlays or [];
-      };
-
-      # ── Per-system ──
-      perSystemFromDiscovery = { pkgs, system, ... }:
-        let
-          p = if hasCustomNixpkgs then customNixpkgsFor system else pkgs;
-          scope = mkScope p system;
-          packages  = filterPlatforms system (buildAll scope found.packages);
-          devShells = buildAll scope found.devshells;
-          checks    = filterPlatforms system (buildAll scope found.checks);
-          formatter = if found.formatter != null then callFile scope found.formatter {}
-            else p.nixfmt-tree or p.nixfmt or (throw "red-tape: no formatter.nix and nixfmt-tree unavailable");
-          pkgChecks = withPrefix "pkgs-" packages
-            // listToAttrs (concatMap (pname:
-              let tests = filterPlatforms system (packages.${pname}.passthru.tests or {});
-              in map (t: { name = "pkgs-${pname}-${t}"; value = tests.${t}; }) (attrNames tests)
-            ) (attrNames packages));
-        in {
-          inherit packages devShells formatter;
-          checks = pkgChecks // withPrefix "devshell-" devShells // checks;
-        };
+      # Per-system: red-tape module + optional user perSystem
+      redTapeModule = module { inherit src nixpkgs prefix inputs self; };
 
       composedPerSystem =
-        if perSystem == null then perSystemFromDiscovery
+        if perSystem == null then redTapeModule
         else args:
-          let d = perSystemFromDiscovery args; u = perSystem args;
+          let d = redTapeModule args; u = perSystem args;
           in d // u // {
             packages  = d.packages  // (u.packages or {});
             devShells = d.devShells // (u.devShells or {});
             checks    = d.checks    // (u.checks or {});
           };
 
-      # ── System-agnostic ──
-      agnostic = { flake = self; inputs = allInputs; };
-
-      hosts = if found.hosts != {} then buildHosts { discovered = found.hosts; inherit allInputs self; } else {};
-      hostAutoChecks = hosts.autoChecks or (_: {});
-
-      discoveredFlake =
-        (if found.overlays != {} then { overlays = buildAll agnostic found.overlays; } else {})
-        // (builtins.removeAttrs hosts [ "autoChecks" ])
-        // (if found.modules != {} then buildModules { discovered = found.modules; inherit allInputs self; extraTypeAliases = moduleTypeAliases; } else {})
-        // (let t = mapAttrs (name: e: { inherit (e) path; description =
-              let f = e.path + "/flake.nix"; in if pathExists f then (import f).description or name else name;
-            }) found.templates; in if t != {} then { templates = t; } else {})
-        // (let l = if found.lib == null then {} else let m = import found.lib;
-              in if isFunction m then m { flake = self; inputs = allInputs; } else m;
-            in if l != {} then { lib = l; } else {});
+      # Flake-level: red-tape outputs + optional user flake
+      redTapeFlake = flakeOutputs { inherit src inputs self prefix moduleTypeAliases; };
 
       composedFlake =
-        if isFunction flake then { withSystem }: discoveredFlake // flake { inherit withSystem; }
-        else discoveredFlake // flake;
+        if isFunction flake then { withSystem }: redTapeFlake // flake { inherit withSystem; }
+        else redTapeFlake // flake;
 
-      finalPerSystem = args @ { pkgs, system, ... }:
+      # Host auto-checks from nixos/darwin configurations in flake outputs
+      nixos = redTapeFlake.nixosConfigurations or {};
+      darwin = redTapeFlake.darwinConfigurations or {};
+      hostAutoChecks = system:
+        let check = pre: cfgs: builtins.listToAttrs (builtins.filter (x: x != null) (builtins.map (n:
+              let s = cfgs.${n}.config.nixpkgs.hostPlatform.system or null;
+              in if s == system then { name = "${pre}-${n}"; value = cfgs.${n}.config.system.build.toplevel; } else null
+            ) (builtins.attrNames cfgs)));
+        in check "nixos" nixos // check "darwin" darwin;
+
+      # Inject host auto-checks into per-system checks
+      finalPerSystem = args @ { system, ... }:
         let base = composedPerSystem args;
         in base // { checks = hostAutoChecks system // base.checks; };
 
@@ -217,7 +178,7 @@ let
     };
 
 in {
-  inherit mkFlake;
+  inherit mkFlake module flakeOutputs;
   _internal = {
     inherit discover callFile buildAll entryPath withPrefix filterPlatforms;
     builders = { inherit buildModules buildHosts; };
