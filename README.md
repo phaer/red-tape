@@ -27,10 +27,10 @@ via adios-flake modules. ~380 lines of library code.
 }
 ```
 
-### À la carte: use as an adios-flake module
+### À la carte: use as an adios-flake module tree
 
 If you already use adios-flake or want fine-grained control, import
-red-tape's module directly:
+red-tape's module tree directly:
 
 ```nix
 # flake.nix
@@ -46,11 +46,18 @@ red-tape's module directly:
       inherit inputs self;
       systems = [ "x86_64-linux" "aarch64-darwin" ];
 
-      # red-tape discovers everything: packages/, devshells/, checks/,
+      # red-tape module tree: discovers packages/, devshells/, checks/,
       # formatter.nix, hosts/, modules/, overlays/, templates/, lib/
-      modules = [
-        (red-tape.lib.module { src = self; inherit inputs self; })
-      ];
+      modules = [ red-tape.modules.default ];
+
+      config = {
+        "/red-tape/scan" = { src = self; };
+        "/red-tape/scope" = { inherit self; inputs = inputs; };
+        "/red-tape/hosts" = { inherit self; inputs = inputs; };
+        "/red-tape/modules" = { inherit self; inputs = inputs; };
+        "/red-tape/overlays" = { inherit self; inputs = inputs; };
+        "/red-tape/lib" = { inherit self; inputs = inputs; };
+      };
 
       # Mix in your own outputs alongside red-tape's
       perSystem = { pkgs, ... }: {
@@ -60,10 +67,21 @@ red-tape's module directly:
 }
 ```
 
-`red-tape.lib.module` returns a single adios-flake module that produces
-both per-system outputs (packages, devShells, checks, formatter) and
-flake-scoped outputs (nixosConfigurations, nixosModules, overlays, etc.).
-adios-flake routes them automatically via `/_collector` and `/_flake`.
+red-tape is a tree of native adios modules. Each sub-module handles one
+concern — `scan` discovers files, `packages` builds them, `hosts` wires
+NixOS configurations, etc. adios memoizes each independently, so
+flake-scoped outputs (hosts, modules, overlays) are evaluated once even
+across multiple systems.
+
+You can also pick individual sub-modules for maximum control:
+
+```nix
+modules = [
+  red-tape.modules.packages
+  red-tape.modules.devshells
+  red-tape.modules.formatter
+];
+```
 
 Host auto-checks (building `system.build.toplevel` for each
 `nixosConfigurations`/`darwinConfigurations` entry) are automatically

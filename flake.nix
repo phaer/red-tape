@@ -16,6 +16,7 @@
     in
     {
       lib = imported;
+      modules = imported.modules;
 
       mkFlake = args:
         imported.mkFlake (args // {

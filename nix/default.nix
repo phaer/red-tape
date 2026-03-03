@@ -1,10 +1,11 @@
 # red-tape — Convention-based Nix project builder on adios-flake
 #
 # Primary API:
-#   red-tape.lib.module { src = self; ... }       — adios-flake module (per-system + flake)
+#   red-tape.modules.default — full adios module tree (all conventions)
+#   red-tape.modules.{packages,devshells,...} — individual modules
 #
 # Convenience:
-#   red-tape.mkFlake { inherit inputs; }           — full flake via mkFlake wrapper
+#   red-tape.mkFlake { inherit inputs; } — full flake via mkFlake wrapper
 { adios-flake }:
 let
   inherit (builtins)
@@ -35,7 +36,7 @@ let
       in if p == [] || elem system p then { name = n; value = a.${n}; } else null
     ) (attrNames a)));
 
-  # ── Module export ──────────────────────────────────────────────────
+  # ── Builders ───────────────────────────────────────────────────────
 
   defaultTypeAliases = { nixos = "nixosModules"; darwin = "darwinModules"; home = "homeModules"; };
 
@@ -60,8 +61,6 @@ let
       let alias = typeAliases.${t} or null;
       in if alias != null then acc // { ${alias} = built.${t}; } else acc
     ) {} (attrNames discovered);
-
-  # ── Host configurations ────────────────────────────────────────────
 
   buildHosts = { discovered, allInputs, self }:
     let
@@ -107,17 +106,11 @@ let
     in
     { nixosConfigurations = nixos; darwinConfigurations = darwin; inherit autoChecks; };
 
-  # ── Public API: adios-flake module ─────────────────────────────────
-  #
-  # Returns a function suitable for use in adios-flake's `modules` list.
-  # Discovers all convention-based outputs (packages/, devshells/, checks/,
-  # hosts/, modules/, overlays/, templates/, lib/) and returns them as a
-  # single attrset. adios-flake's /_collector and /_flake handle routing
-  # per-system vs flake-scoped keys automatically.
+  # ── Module tree ────────────────────────────────────────────────────
 
-  module = import ./module.nix {
+  modules = import ./modules {
     inherit discover callFile buildAll filterPlatforms withPrefix
-            buildModules buildHosts;
+            buildModules buildHosts entryPath;
   };
 
   # ── Convenience: mkFlake wrapper ───────────────────────────────────
@@ -136,23 +129,42 @@ let
     , moduleTypeAliases ? {}
     }:
     let
-      # red-tape's unified module: discovers everything, returns both
-      # per-system keys and flake-scoped keys in one attrset
-      redTapeModule = module {
-        inherit src nixpkgs prefix inputs self;
-        moduleTypeAliases = moduleTypeAliases;
+      allInputs = inputs;
+
+      # Build config paths for the red-tape module tree
+      scanConfig = { src = src; }
+        // (if prefix != null then { inherit prefix; } else {});
+
+      scopeConfig = { inherit self; inputs = allInputs; };
+      hostsConfig = { inherit self; inputs = allInputs; };
+      modulesConfig = { inherit self; inputs = allInputs; }
+        // (if moduleTypeAliases != {} then { inherit moduleTypeAliases; } else {});
+      overlaysConfig = { inherit self; inputs = allInputs; };
+      libConfig = { inherit self; inputs = allInputs; };
+
+      redTapeConfig = {
+        "/red-tape/scan" = scanConfig;
+        "/red-tape/scope" = scopeConfig;
+        "/red-tape/hosts" = hostsConfig;
+        "/red-tape/modules" = modulesConfig;
+        "/red-tape/overlays" = overlaysConfig;
+        "/red-tape/lib" = libConfig;
       };
 
     in
     adiosFlakeLib.mkFlake {
-      inherit inputs self systems config;
-      modules = [ redTapeModule ] ++ modules;
+      inherit inputs self systems;
+      modules = [ redTapeModules.default ] ++ modules;
       perSystem = perSystem;
       flake = flake;
+      config = redTapeConfig // config;
     };
 
+  redTapeModules = modules;
+
 in {
-  inherit mkFlake module;
+  inherit mkFlake;
+  modules = redTapeModules;
   _internal = {
     inherit discover callFile buildAll entryPath withPrefix filterPlatforms;
     builders = { inherit buildModules buildHosts; };

@@ -2,6 +2,7 @@
 let
   adios-flake = builtins.getFlake "github:phaer/adios-flake/flake-outputs";
   redTape = import ../nix { inherit adios-flake; };
+  adiosLib = adios-flake.inputs.adios.adios;
 
   lib = import <nixpkgs/lib>;
 
@@ -24,6 +25,6 @@ let
   fixtures = ../tests/fixtures;
 in
 {
-  inherit mockPkgs sys fixtures;
+  inherit mockPkgs sys fixtures adiosLib;
   _internal = redTape._internal;
 }
