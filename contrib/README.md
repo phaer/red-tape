@@ -1,7 +1,7 @@
 # red-tape contrib modules
 
 Optional adios-flake modules for output types outside red-tape's minimal core.
-Pass them via `modules` in your `mkFlake` call.
+Pass them via `extraModules` in your `mkFlake` call.
 
 ## Available modules
 
@@ -24,10 +24,7 @@ Pass them via `modules` in your `mkFlake` call.
     inputs.red-tape.mkFlake {
       inherit inputs;
       extraModules = [
-        (import (inputs.red-tape + "/contrib/system-manager.nix") {
-          inherit inputs;
-          src = inputs.self;
-        })
+        (import (inputs.red-tape + "/contrib/system-manager.nix"))
       ];
     };
 }
@@ -37,26 +34,29 @@ Then put your system-manager configs in `hosts/<name>/system-configuration.nix`.
 
 ## Writing your own
 
-A contrib module is a standard adios-flake ergonomic function module.
-Import `nix/discover.nix` directly for host-type or directory scanning:
+Contrib modules are standard adios-flake config modules. They extend red-tape by
+setting options on the `/red-tape/scan` and `/red-tape/hosts` modules:
+
+- **`/red-tape/scan`.extraHostTypes** — list of `{ type; file; }` sentinel descriptors,
+  appended to the core types so `hosts/` scanning picks them up.
+- **`/red-tape/hosts`.extraHostBuilders** — attrset of `type → { outputKey; build }`,
+  where `build` receives `{ name, info, specialArgs, allInputs }`.
 
 ```nix
 # Example: nix-on-droid support
-{ inputs, src }:
-let
-  discover = import (inputs.red-tape + "/nix/discover.nix");
-  discovered = discover.scanHosts (src + "/hosts") [
+_: {
+  "/red-tape/scan".extraHostTypes = [
     { type = "nix-on-droid"; file = "droid-configuration.nix"; }
   ];
-in
-{ self, ... }:
-{
-  nixOnDroidConfigurations = builtins.mapAttrs (hostName: hostInfo:
-    inputs.nix-on-droid.lib.nixOnDroidConfiguration {
-      pkgs = import inputs.nixpkgs { system = "aarch64-linux"; };
-      modules = [ hostInfo.configPath ];
-      extraSpecialArgs = { flake = self; inherit hostName; };
-    }
-  ) discovered;
+
+  "/red-tape/hosts".extraHostBuilders.nix-on-droid = {
+    outputKey = "nixOnDroidConfigurations";
+    build = { name, info, specialArgs, allInputs }:
+      allInputs.nix-on-droid.lib.nixOnDroidConfiguration {
+        pkgs = import allInputs.nixpkgs { system = "aarch64-linux"; };
+        modules = [ info.configPath ];
+        extraSpecialArgs = specialArgs // { hostName = name; };
+      };
+  };
 }
 ```
