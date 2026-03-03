@@ -10,19 +10,66 @@ A clone of [blueprint](https://github.com/numtide/blueprint) rebuilt on
 [adios-flake](https://github.com/Mic92/adios-flake). Same directory
 conventions, same idea — drop `.nix` files in the right place, get flake
 outputs — but with adios memoization, overlay support, and extensibility
-via adios-flake modules. ~300 lines of library code.
+via adios-flake modules. ~380 lines of library code.
 
 ## Quick Start
+
+### Simple: all-in-one wrapper
 
 ```nix
 # flake.nix
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.red-tape.url = "github:phaer/red-tape";
+  inputs.red-tape.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs = inputs: inputs.red-tape.lib { inherit inputs; };
 }
 ```
+
+### À la carte: use as an adios-flake module
+
+If you already use adios-flake or want fine-grained control, import
+red-tape's module and flake outputs individually:
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    adios-flake.url = "github:Mic92/adios-flake";
+    red-tape.url = "github:phaer/red-tape";
+  };
+
+  outputs = inputs@{ adios-flake, red-tape, self, ... }:
+    adios-flake.lib.mkFlake {
+      inherit inputs self;
+      systems = [ "x86_64-linux" "aarch64-darwin" ];
+
+      # red-tape discovers packages/, devshells/, checks/, formatter.nix
+      modules = [
+        (red-tape.lib.module { src = self; inherit inputs self; })
+      ];
+
+      # red-tape discovers hosts/, modules/, overlays/, templates/, lib/
+      flake = red-tape.lib.flakeOutputs { src = self; inherit inputs self; };
+
+      # Mix in your own per-system outputs alongside red-tape's
+      perSystem = { pkgs, ... }: {
+        packages.extra = pkgs.cowsay;
+      };
+    };
+}
+```
+
+`red-tape.lib.module` returns an adios-flake module function, so it
+composes naturally with other modules. `red-tape.lib.flakeOutputs`
+returns a plain attrset of system-agnostic outputs.
+
+Note: in à-la-carte mode, host auto-checks (building `system.build.toplevel`
+for each `nixosConfigurations`/`darwinConfigurations` entry) are not
+automatically injected into per-system checks. The all-in-one wrapper
+handles this for you.
 
 ```
 my-project/
@@ -324,11 +371,23 @@ is available in [`contrib/system-manager.nix`](contrib/).
 ## Architecture
 
 ```
-flake.nix           — entry point, __functor wrapper
+flake.nix               — entry point, __functor wrapper
 nix/
-  default.nix       — primitives, builders, mkFlake  (225 lines)
-  discover.nix      — pure filesystem scanning        (79 lines)
+  default.nix            — primitives, builders, mkFlake shim
+  module.nix             — adios-flake module (per-system discovery)
+  flake-outputs.nix      — system-agnostic flake outputs
+  discover.nix           — pure filesystem scanning
 ```
+
+The core is split into composable pieces:
+
+- **`module.nix`** — an adios-flake module that discovers `packages/`,
+  `devshells/`, `checks/`, `formatter.nix` and produces per-system outputs
+- **`flake-outputs.nix`** — discovers `hosts/`, `modules/`, `overlays/`,
+  `templates/`, `lib/` and returns a plain attrset
+- **`default.nix`** — shared primitives (`callFile`, `buildAll`, etc.),
+  domain builders (modules, hosts), and `mkFlake` as a thin wrapper that
+  composes the module + flake outputs into an `adiosFlakeLib.mkFlake` call
 
 **Five primitives** — `callFile`, `entryPath`, `buildAll`, `withPrefix`,
 `filterPlatforms` — compose to handle all per-system output types.
