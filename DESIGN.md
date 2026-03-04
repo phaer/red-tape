@@ -25,7 +25,7 @@ No evaluation happens here — only `builtins.readDir`, `builtins.pathExists`, a
 
 ### modules/
 
-[adios-flake](https://github.com/phaer/adios-flake) modules that consume discovered data and build flake outputs. adios-flake is a flake-output wrapper around [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering.
+[adios-flake](https://github.com/Mic92/adios-flake) modules that consume discovered data and build flake outputs. adios-flake is a flake-output wrapper around [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering.
 
 ```
 scan ──→ scope ──→ packages
@@ -57,7 +57,7 @@ Shared helper functions used by multiple modules:
 
 ### Why adios-flake?
 
-[adios-flake](https://github.com/phaer/adios-flake) wraps [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering. Each module declares its inputs (other modules it depends on) and gets their results injected. This avoids the complexity of NixOS-style module merging while still supporting composition.
+[adios-flake](https://github.com/Mic92/adios-flake) wraps [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering. Each module declares its inputs (other modules it depends on) and gets their results injected. This avoids the complexity of NixOS-style module merging while still supporting composition.
 
 ### Why convention-over-configuration?
 

@@ -1,6 +1,6 @@
 # red-tape
 
-Convention-based Nix project builder, based on [adios-flake](https://github.com/phaer/adios-flake) and inspired by [blueprint](https://github.com/numtide/blueprint).
+Convention-based Nix project builder, based on [adios-flake](https://github.com/Mic92/adios-flake) and inspired by [blueprint](https://github.com/numtide/blueprint).
 
 Drop your Nix files in the right places, and red-tape turns them into a complete flake — packages, devshells, checks, NixOS hosts, modules, templates, and lib — with zero boilerplate.
 
@@ -161,7 +161,7 @@ red-tape.mkFlake {
 | | red-tape | blueprint | flake-parts |
 |---|---|---|---|
 | Approach | Filesystem conventions | Filesystem conventions | Module options |
-| Module system | [adios-flake](https://github.com/phaer/adios-flake) | None (pure functions) | NixOS modules |
+| Module system | [adios-flake](https://github.com/Mic92/adios-flake) | None (pure functions) | NixOS modules |
 | Boilerplate | Minimal | Minimal | More explicit |
 | Extension | Contrib modules | Limited | flake-parts modules |
 | Host support | NixOS + contrib (darwin, home-manager, system-manager) | None | Via modules |
