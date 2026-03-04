@@ -1,5 +1,11 @@
 # red-tape
 
+> ⚠️ **This is slop.** Written by an LLM, guided by a human(?) who kept
+> saying "make it more elegant" until something stuck. Expect overconfident
+> documentation, undertested edge cases, and questionable design decisions.
+> Use at your own risk — or just use
+> [blueprint](https://github.com/numtide/blueprint).
+
 Convention-based Nix project builder, based on [adios-flake](https://github.com/Mic92/adios-flake) and inspired by [blueprint](https://github.com/numtide/blueprint).
 
 Drop your Nix files in the right places, and red-tape turns them into a complete flake — packages, devshells, checks, NixOS hosts, modules, templates, and lib — with zero boilerplate.
