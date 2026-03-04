@@ -7,6 +7,12 @@ let
 
   default = {
     name = "red-tape";
+    outputs = {
+      modules = {
+        type = "attrset";
+        scope = "flake";
+      };
+    };
     inputs = {
       packages = {
         path = "./packages";
