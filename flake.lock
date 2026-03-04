@@ -20,16 +20,15 @@
         "adios": "adios"
       },
       "locked": {
-        "lastModified": 1772622359,
+        "lastModified": 1772646328,
         "narHash": "sha256-0xwNbjvHON8LqhIx5VMPZpR1B5Unq/7BH6tktELwRyA=",
-        "owner": "phaer",
+        "owner": "Mic92",
         "repo": "adios-flake",
-        "rev": "947f7438e3b768fe7e6c85042cc2531d3ed592bb",
+        "rev": "6082a7bf428fe6c29b80c8ef4582ffce46cfea77",
         "type": "github"
       },
       "original": {
-        "owner": "phaer",
-        "ref": "config-absolute-paths",
+        "owner": "Mic92",
         "repo": "adios-flake",
         "type": "github"
       }
