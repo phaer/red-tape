@@ -72,18 +72,12 @@ in
     scan = {
       path = "../scan";
     };
-  };
-  options = {
-    moduleTypes = {
-      type = {
-        name = "attrs";
-        verify = v: if builtins.isAttrs v then null else "expected attrset";
-      };
-      default = { };
+    contrib = {
+      path = "../contrib";
     };
   };
   impl =
-    { results, options, ... }:
+    { results, ... }:
     let
       inherit (results.scan) discovered self inputs;
     in
@@ -91,7 +85,7 @@ in
       buildModules {
         discovered = discovered.modules;
         inherit inputs self;
-        extraModuleTypes = options.moduleTypes;
+        extraModuleTypes = results.contrib.moduleTypes;
       }
     else
       { };

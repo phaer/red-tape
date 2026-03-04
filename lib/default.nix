@@ -1,58 +1,43 @@
 # red-tape — Convention-based Nix project builder on adios-flake
 { adios-flake }:
 let
-  inherit (builtins)
-    attrNames
-    foldl'
-    isAttrs
-    isList
-    isFunction
-    map
-    ;
-
   adiosFlakeLib = adios-flake.lib or adios-flake;
   defaultModules = import ../modules;
 
-  # Deep-merge two values: concatenate lists, recursively merge attrsets,
-  # right side wins for scalars.
-  deepMerge =
-    a: b:
-    if isList a && isList b then
-      a ++ b
-    else if isAttrs a && isAttrs b then
-      foldl' (
-        acc: key:
-        acc
-        // {
-          ${key} = if acc ? ${key} then deepMerge acc.${key} b.${key} else b.${key};
-        }
-      ) a (attrNames b)
-    else
-      b;
+  strip = m: builtins.removeAttrs m [ "name" ];
 
-  # Evaluate contrib-style modules (functions returning "/path" config attrsets),
-  # strip leading "/" from keys, and deep-merge their results.
-  evalContribModules =
+  # Build the red-tape root module with contrib submodules dynamically wired.
+  # Each contrib module becomes a child of the contrib collector, which
+  # aggregates their results for scan/hosts/modules to consume via inputs.
+  mkRootModule =
+    contribs:
     let
-      stripLeadingSlash =
-        s:
-        let
-          len = builtins.stringLength s;
-        in
-        if len > 0 && builtins.substring 0 1 s == "/" then builtins.substring 1 (len - 1) s else s;
-      stripKeys =
-        a:
-        builtins.listToAttrs (
-          map (k: {
-            name = stripLeadingSlash k;
-            value = a.${k};
-          }) (attrNames a)
-        );
+      base = defaultModules.redTape.default;
+      contribMod = base.modules.contrib;
+      # Wire each contrib as a submodule with an input in the collector
+      numberedContribs = builtins.genList (i: {
+        name = "_c${toString i}";
+        value = strip (builtins.elemAt contribs i);
+      }) (builtins.length contribs);
+      contribChildren = builtins.listToAttrs numberedContribs;
+      contribInputs = builtins.listToAttrs (
+        map (c: {
+          inherit (c) name;
+          value = {
+            path = "./${c.name}";
+          };
+        }) numberedContribs
+      );
     in
-    foldl' (
-      acc: mod:
-      deepMerge acc (stripKeys (if isFunction mod then mod null else mod))
-    ) { };
+    base
+    // {
+      modules = base.modules // {
+        contrib = contribMod // {
+          inputs = contribMod.inputs or { } // contribInputs;
+          modules = (contribMod.modules or { }) // contribChildren;
+        };
+      };
+    };
 
   mkFlake =
     {
@@ -71,16 +56,6 @@ let
       config ? { },
       flake ? { },
     }:
-    let
-      contribConfig = evalContribModules modules;
-      baseConfig = {
-        "red-tape/scan" = {
-          inherit src self;
-          inputs = inputs;
-        }
-        // (if prefix != null then { inherit prefix; } else { });
-      };
-    in
     adiosFlakeLib.mkFlake {
       inherit
         inputs
@@ -89,11 +64,15 @@ let
         perSystem
         flake
         ;
-      modules = [ defaultModules.redTape.default ];
-      config = foldl' deepMerge baseConfig [
-        contribConfig
-        config
-      ];
+      modules = [ (mkRootModule modules) ];
+      config = {
+        "red-tape/scan" = {
+          inherit src self;
+          inputs = inputs;
+        }
+        // (if prefix != null then { inherit prefix; } else { });
+      }
+      // config;
     };
 in
 {

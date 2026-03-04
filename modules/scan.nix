@@ -4,10 +4,15 @@
 { discover }:
 
 let
-  inherit (builtins) isPath isList removeAttrs;
+  inherit (builtins) isPath removeAttrs;
 in
 {
   name = "scan";
+  inputs = {
+    contrib = {
+      path = "../contrib";
+    };
+  };
   options = {
     src = {
       type = {
@@ -39,16 +44,9 @@ in
       };
       default = { };
     };
-    extraHostTypes = {
-      type = {
-        name = "list";
-        verify = v: if isList v then null else "expected a list";
-      };
-      default = [ ];
-    };
   };
   impl =
-    { options, ... }:
+    { options, results, ... }:
     let
       src = options.src;
       prefix = options.prefix;
@@ -57,7 +55,7 @@ in
         if prefix != null then (if isPath prefix then prefix else src + "/${prefix}") else src;
       inputs =
         (removeAttrs options.inputs [ "self" ]) // (if self != null then { inherit self; } else { });
-      hostTypes = discover.coreHostTypes ++ options.extraHostTypes;
+      hostTypes = discover.coreHostTypes ++ results.contrib.scanHostTypes;
     in
     {
       discovered = discover.discoverAll resolvedSrc // {

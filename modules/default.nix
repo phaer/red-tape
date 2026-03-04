@@ -49,11 +49,12 @@ let
       modules = strip (import ./modules.nix);
       templates = strip (import ./templates.nix);
       lib = strip (import ./lib.nix);
+      contrib = strip (import ./contrib.nix);
     };
   };
 in
 {
-  redTape = builtins.removeAttrs default.modules [ "modules" ] // {
+  redTape = builtins.removeAttrs default.modules [ "modules" "contrib" ] // {
     inherit default;
     home-manager = import ../contrib/home-manager.nix;
     darwin = import ../contrib/darwin.nix;

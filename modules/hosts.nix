@@ -131,18 +131,12 @@ in
     scan = {
       path = "../scan";
     };
-  };
-  options = {
-    extraHostTypes = {
-      type = {
-        name = "attrs";
-        verify = v: if isAttrs v then null else "expected attrset";
-      };
-      default = { };
+    contrib = {
+      path = "../contrib";
     };
   };
   impl =
-    { results, options, ... }:
+    { results, ... }:
     let
       inherit (results.scan) discovered self inputs;
     in
@@ -150,7 +144,7 @@ in
       buildHosts {
         discovered = discovered.hosts;
         inherit inputs self;
-        extraHostTypes = options.extraHostTypes;
+        extraHostTypes = results.contrib.hostTypes;
       }
     else
       {
