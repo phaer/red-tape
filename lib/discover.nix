@@ -219,6 +219,9 @@ in
     scanDir
     scanHosts
     coreHostTypes
+    optional
+    optionalDefault
+    optionalSingle
     discoverAll
     ;
 }
