@@ -1,4 +1,4 @@
-# discover.nix — Pure filesystem scanning
+# discover.nix — Scanning primitives for filesystem-based discovery
 #
 # Expected project layout:
 #

@@ -3,9 +3,9 @@
 ## Architecture Overview
 
 ```
-lib/discover.nix    Pure filesystem scanning (no evaluation)
-        ↓
-modules/*           adios-flake modules (build logic)
+lib/discover.nix    Scanning primitives (scanDir, scanEntries, scanSubdirs, …)
+        ↑
+modules/*           adios-flake modules (each imports the primitives it needs)
         ↓
 lib/default.nix     Entry point: mkFlake + module re-export
         ↓
@@ -18,10 +18,9 @@ Scanning primitives used by individual modules. No evaluation happens here — o
 
 - **`scanDir path`** — Reads a directory and returns `{ name = { path; type; }; }` for each `.nix` file or subdirectory with `default.nix`. Strips `.nix` extensions.
 - **`scanHosts hostsDir hostTypes`** — Scans `hosts/` subdirectories, matching against an ordered list of `{ type, file }` specs. First match wins.
+- **`scanEntries { dir?, single?, singleName? }`** — Scans a directory for entries with optional single-file fallback. Used by packages, devshells, and checks.
+- **`scanSubdirs path f`** — Lists subdirectories of a path and applies `f` to each. Used by modules (`scanSubdirs p scanDir`) and templates (`scanSubdirs p (p: { path = p; })`).
 - **`coreHostTypes`** — Built-in host type specs: `nixos` (configuration.nix), `custom` (default.nix).
-- **`optional path`** — `scanDir` that returns `{}` when empty or missing.
-- **`optionalDefault path`** — Checks for `default.nix` in a directory.
-- **`optionalSingle path name`** — Checks for a single file and returns it as a named entry.
 
 ### modules/
 
@@ -77,10 +76,10 @@ NixOS modules are the most common case. Darwin and home-manager modules are opt-
 
 ### Custom Host Types
 
-Contrib modules can add host types by setting two adios-flake config paths:
+Contrib modules provide two things that the `hosts` module picks up via its `contrib` input:
 
-1. `"/red-tape/scan".extraHostTypes` — Adds `{ type, file }` specs to the scanner
-2. `"/red-tape/hosts".extraHostTypes.${type}` — Provides `{ outputKey, build }` for the builder
+1. **`scanHostTypes`** — `{ type, file }` specs appended to `coreHostTypes` for host discovery
+2. **`hostTypes.${type}`** — `{ outputKey, build }` for the builder
 
 See `contrib/darwin.nix`, `contrib/home-manager.nix`, and `contrib/system-manager.nix` for examples.
 
