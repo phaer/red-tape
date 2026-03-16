@@ -14,34 +14,36 @@ flake.nix           Public API
 
 ### lib/discover.nix
 
-Pure functions that scan the filesystem and return structured data:
+Scanning primitives used by individual modules. No evaluation happens here — only `builtins.readDir`, `builtins.pathExists`, and path construction.
 
-- **`scanDir path`** — Reads a directory and returns `{ name = path; }` for each `.nix` file or subdirectory with `default.nix`. Strips `.nix` extensions. Renames `default` entries to the parent directory name.
+- **`scanDir path`** — Reads a directory and returns `{ name = { path; type; }; }` for each `.nix` file or subdirectory with `default.nix`. Strips `.nix` extensions.
 - **`scanHosts hostsDir hostTypes`** — Scans `hosts/` subdirectories, matching against an ordered list of `{ type, file }` specs. First match wins.
 - **`coreHostTypes`** — Built-in host type specs: `nixos` (configuration.nix), `custom` (default.nix).
-- **`discoverAll src`** — Discovers all convention paths under `src` and returns `{ packages, devShells, checks, formatter, hosts, modules, templates, lib }`.
-
-No evaluation happens here — only `builtins.readDir`, `builtins.pathExists`, and path construction.
+- **`optional path`** — `scanDir` that returns `{}` when empty or missing.
+- **`optionalDefault path`** — Checks for `default.nix` in a directory.
+- **`optionalSingle path name`** — Checks for a single file and returns it as a named entry.
 
 ### modules/
 
-[adios-flake](https://github.com/Mic92/adios-flake) modules that consume discovered data and build flake outputs. adios-flake is a flake-output wrapper around [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering.
+[adios-flake](https://github.com/Mic92/adios-flake) modules that handle both discovery and building for their output type. adios-flake is a flake-output wrapper around [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering.
+
+Each module imports the scanning primitives it needs from `lib/discover.nix` and scans the filesystem itself. The `scan` module is a thin context provider (`resolvedSrc`, `self`, `inputs`).
 
 ```
-scan ──→ scope ──→ packages
-              ├──→ devshells
-              ├──→ formatter
-              └──→ checks (also depends on packages, devshells, hosts)
+scan ──→ scope ──→ packages  (scans packages/, package.nix)
+              ├──→ devshells (scans devshells/, devshell.nix)
+              ├──→ formatter (scans formatter.nix)
+              └──→ checks    (scans checks/; also depends on packages, devshells, hosts)
 
-scan ──→ hosts
-    ├──→ modules
-    ├──→ templates
-    └──→ lib
+scan ──→ hosts      (scans hosts/ via scanHosts; depends on contrib)
+    ├──→ modules    (scans modules/{type}/; depends on contrib)
+    ├──→ templates  (scans templates/)
+    └──→ lib        (scans lib/default.nix)
 ```
 
 **Per-system modules** (packages, devshells, formatter, checks) depend on `scope` which provides `{ system, pkgs, lib, flake, inputs, perSystem }`.
 
-**System-agnostic modules** (hosts, modules, templates, lib) depend only on `scan`.
+**System-agnostic modules** (hosts, modules, templates, lib) depend only on `scan` (plus `contrib` where extensible).
 
 ### lib/utils.nix
 
@@ -96,7 +98,7 @@ This can be set via contrib modules that set `"/red-tape/modules".moduleTypes`, 
 
 Tests use [nix-unit](https://github.com/nix-community/nix-unit) and live in `tests/`:
 
-- **Unit tests** (`scan-dir.nix`, `discover.nix`) — Test pure scanning functions against fixtures
+- **Scanning tests** (`scan-dir.nix`, `discover.nix`) — Test scanning primitives and per-type patterns against fixtures
 - **Builder tests** (`integration.nix`, `hosts.nix`, `modules-export.nix`, etc.) — Test build logic with mock pkgs
 - **Module tree tests** (`module.nix`) — Test the full adios-flake module tree end-to-end
 - **Extensibility tests** (`extensibility.nix`) — Test custom host types and module types
