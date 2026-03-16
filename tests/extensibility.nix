@@ -8,7 +8,7 @@ let
     ;
   inherit (helpers) entryPath;
   inherit (builders) buildModules;
-  inherit (discover) scanDir scanHosts;
+  inherit (discover) scanDir scanHosts coreHostTypes;
 in
 {
   testScanCustomHostType = {
@@ -31,7 +31,7 @@ in
     };
   };
   testCoreHostTypesIgnoreCustom = {
-    expr = (discover.discoverAll (fixtures + "/custom-hosts")).hosts;
+    expr = scanHosts (fixtures + "/custom-hosts/hosts") coreHostTypes;
     expected = { };
   };
   testScanHostsFirstMatchWins = {
@@ -94,8 +94,16 @@ in
   testExtraModuleTypes = {
     expr =
       let
+        modulesPath = fixtures + "/custom-modules/modules";
+        entries = builtins.readDir modulesPath;
+        discovered = builtins.listToAttrs (
+          builtins.map (n: {
+            name = n;
+            value = scanDir (modulesPath + "/${n}");
+          }) (builtins.filter (n: entries.${n} == "directory") (builtins.attrNames entries))
+        );
         result = buildModules {
-          discovered = (discover.discoverAll (fixtures + "/custom-modules")).modules;
+          inherit discovered;
           extraModuleTypes = {
             flake = "flakeModules";
           };
@@ -106,7 +114,10 @@ in
         modNames = builtins.attrNames (result.flakeModules or { });
       };
     expected = {
-      keys = [ "flakeModules" "modules" ];
+      keys = [
+        "flakeModules"
+        "modules"
+      ];
       modNames = [ "mymod" ];
     };
   };

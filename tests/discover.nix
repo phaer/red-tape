@@ -1,35 +1,113 @@
-# Tests for the discover module
+# Tests for per-type scanning patterns (matching what modules do)
 let
   discover = import ../lib/discover.nix;
-  inherit (discover) discoverAll;
-  fixtures = ../tests/fixtures;
+  inherit (discover)
+    scanDir
+    scanHosts
+    coreHostTypes
+    optional
+    optionalDefault
+    optionalSingle
+    ;
+  inherit (builtins) attrNames pathExists readDir filter;
 
   sort = builtins.sort builtins.lessThan;
-  names = s: builtins.attrNames s;
-  d = path: discoverAll (fixtures + "/${path}");
+
+  fixtures = ../tests/fixtures;
+
+  # Per-type scanning — mirrors what each module does internally
+  scanPackages =
+    src:
+    optionalDefault (src + "/packages")
+    // optional (src + "/packages")
+    // optionalSingle (src + "/package.nix") "default";
+
+  scanDevshells =
+    src:
+    optionalDefault (src + "/devshells")
+    // optional (src + "/devshells")
+    // optionalSingle (src + "/devshell.nix") "default";
+
+  scanChecks = src: optionalDefault (src + "/checks") // optional (src + "/checks");
+
+  scanFormatter =
+    src:
+    let
+      p = src + "/formatter.nix";
+    in
+    if pathExists p then p else null;
+
+  scanModules =
+    src:
+    let
+      p = src + "/modules";
+    in
+    if !pathExists p then
+      { }
+    else
+      let
+        e = readDir p;
+      in
+      builtins.listToAttrs (
+        builtins.map (n: {
+          name = n;
+          value = scanDir (p + "/${n}");
+        }) (filter (n: e.${n} == "directory") (attrNames e))
+      );
+
+  scanTemplates =
+    src:
+    let
+      p = src + "/templates";
+    in
+    if !pathExists p then
+      { }
+    else
+      let
+        e = readDir p;
+      in
+      builtins.listToAttrs (
+        builtins.map (n: {
+          name = n;
+          value = {
+            path = p + "/${n}";
+          };
+        }) (filter (n: e.${n} == "directory") (attrNames e))
+      );
+
+  scanLib =
+    src:
+    let
+      p = src + "/lib/default.nix";
+    in
+    if pathExists p then p else null;
+
+  full = fixtures + "/full";
+  minimal = fixtures + "/minimal";
+  empty = fixtures + "/empty";
 in
 {
   # --- Full fixture ---
 
-  testFullPackages.expr = sort (names (d "full").packages);
+  testFullPackages.expr = sort (attrNames (scanPackages full));
   testFullPackages.expected = [
     "goodbye"
     "hello"
   ];
 
-  testFullDevshells.expr = sort (names (d "full").devshells);
+  testFullDevshells.expr = sort (attrNames (scanDevshells full));
   testFullDevshells.expected = [
     "backend"
     "default"
   ];
 
-  testFullChecks.expr = names (d "full").checks;
+  testFullChecks.expr = attrNames (scanChecks full);
   testFullChecks.expected = [ "mycheck" ];
 
-  testFullFormatter.expr = (d "full").formatter != null;
+  testFullFormatter.expr = (scanFormatter full) != null;
   testFullFormatter.expected = true;
 
-  testFullHosts.expr = sort (names (d "full").hosts);
+  testFullHosts.expr = sort (attrNames (scanHosts (full + "/hosts") coreHostTypes));
   testFullHosts.expected = [
     "custom"
     "db"
@@ -41,7 +119,7 @@ in
   testFullHostTypes = {
     expr =
       let
-        h = (d "full").hosts;
+        h = scanHosts (full + "/hosts") coreHostTypes;
       in
       {
         myhost = h.myhost.type;
@@ -55,57 +133,51 @@ in
     };
   };
 
-  testFullModuleTypes.expr = sort (names (d "full").modules);
+  testFullModuleTypes.expr = sort (attrNames (scanModules full));
   testFullModuleTypes.expected = [
     "darwin"
     "home"
     "nixos"
   ];
 
-  testFullNixosModules.expr = sort (names (d "full").modules.nixos);
+  testFullNixosModules.expr = sort (attrNames (scanModules full).nixos);
   testFullNixosModules.expected = [
     "injected"
     "server"
   ];
 
-  testFullHomeModules.expr = names (d "full").modules.home;
+  testFullHomeModules.expr = attrNames (scanModules full).home;
   testFullHomeModules.expected = [ "shared" ];
 
-  testFullTemplates.expr = sort (names (d "full").templates);
+  testFullTemplates.expr = sort (attrNames (scanTemplates full));
   testFullTemplates.expected = [
     "default"
     "minimal"
   ];
 
-  testFullLib.expr = (d "full").lib != null;
+  testFullLib.expr = (scanLib full) != null;
   testFullLib.expected = true;
 
   # --- Minimal fixture ---
 
-  testMinimalPackage.expr = names (d "minimal").packages;
+  testMinimalPackage.expr = attrNames (scanPackages minimal);
   testMinimalPackage.expected = [ "default" ];
 
-  testMinimalNoFormatter.expr = (d "minimal").formatter;
+  testMinimalNoFormatter.expr = scanFormatter minimal;
   testMinimalNoFormatter.expected = null;
 
   # --- Empty fixture ---
 
   testEmpty = {
-    expr =
-      let
-        r = d "empty";
-      in
-      {
-        inherit (r)
-          packages
-          devshells
-          checks
-          hosts
-          modules
-          formatter
-          templates
-          ;
-      };
+    expr = {
+      packages = scanPackages empty;
+      devshells = scanDevshells empty;
+      checks = scanChecks empty;
+      hosts = scanHosts (empty + "/hosts") coreHostTypes;
+      modules = scanModules empty;
+      formatter = scanFormatter empty;
+      templates = scanTemplates empty;
+    };
     expected = {
       packages = { };
       devshells = { };
@@ -119,7 +191,7 @@ in
 
   # --- Prefixed fixture ---
 
-  testPrefixedPackages.expr = sort (names (d "prefixed/nix").packages);
+  testPrefixedPackages.expr = sort (attrNames (scanPackages (fixtures + "/prefixed/nix")));
   testPrefixedPackages.expected = [
     "default"
     "widget"

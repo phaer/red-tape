@@ -1,7 +1,15 @@
 # Tests for lib export
 let
   prelude = import ./prelude.nix;
-  inherit (prelude) discover fixtures;
+  inherit (prelude) fixtures;
+  inherit (builtins) pathExists;
+
+  scanLib =
+    src:
+    let
+      p = src + "/lib/default.nix";
+    in
+    if pathExists p then p else null;
 
   importLib =
     libPath: args:
@@ -15,14 +23,14 @@ let
 in
 {
   testLibPresent = {
-    expr = (discover.discoverAll (fixtures + "/full")).lib != null;
+    expr = (scanLib (fixtures + "/full")) != null;
     expected = true;
   };
 
   testLibImport = {
     expr =
       let
-        libPath = (discover.discoverAll (fixtures + "/full")).lib;
+        libPath = scanLib (fixtures + "/full");
         lib = importLib libPath {
           flake = null;
           inputs = { };
@@ -33,14 +41,14 @@ in
   };
 
   testNoLib = {
-    expr = (discover.discoverAll (fixtures + "/empty")).lib;
+    expr = scanLib (fixtures + "/empty");
     expected = null;
   };
 
   testPlainLib = {
     expr =
       let
-        libPath = (discover.discoverAll (fixtures + "/plain-lib")).lib;
+        libPath = scanLib (fixtures + "/plain-lib");
         lib = importLib libPath { };
       in
       lib.add 1 2;

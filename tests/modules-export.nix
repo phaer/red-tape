@@ -2,10 +2,25 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) discover builders fixtures;
+  inherit (discover) scanDir;
   inherit (builders) buildModules;
+  inherit (builtins) attrNames filter readDir;
+
+  scanModules =
+    src:
+    let
+      p = src + "/modules";
+      e = readDir p;
+    in
+    builtins.listToAttrs (
+      builtins.map (n: {
+        name = n;
+        value = scanDir (p + "/${n}");
+      }) (filter (n: e.${n} == "directory") (attrNames e))
+    );
 
   full = buildModules {
-    discovered = (discover.discoverAll (fixtures + "/full")).modules;
+    discovered = scanModules (fixtures + "/full");
   };
 
   empty = buildModules { discovered = { }; };
@@ -13,12 +28,19 @@ in
 {
   testOutputKeys = {
     expr = builtins.sort builtins.lessThan (builtins.attrNames full);
-    expected = [ "modules" "nixosModules" ];
+    expected = [
+      "modules"
+      "nixosModules"
+    ];
   };
 
   testModulesHierarchy = {
     expr = builtins.sort builtins.lessThan (builtins.attrNames full.modules);
-    expected = [ "darwin" "home" "nixos" ];
+    expected = [
+      "darwin"
+      "home"
+      "nixos"
+    ];
   };
 
   testModulesNixosMatchesNixosModules = {
@@ -65,7 +87,7 @@ in
           outPath = "/my/flake";
         };
         result = buildModules {
-          discovered = (discover.discoverAll (fixtures + "/full")).modules;
+          discovered = scanModules (fixtures + "/full");
           inputs = {
             nixpkgs = "fake-nixpkgs";
             self = fakeSelf;

@@ -1,26 +1,53 @@
 # Template tests
 let
   prelude = import ./prelude.nix;
-  inherit (prelude) discover fixtures;
+  inherit (prelude) fixtures;
+  inherit (builtins)
+    attrNames
+    filter
+    listToAttrs
+    map
+    mapAttrs
+    pathExists
+    readDir
+    ;
+
+  scanTemplates =
+    src:
+    let
+      p = src + "/templates";
+    in
+    if !pathExists p then
+      { }
+    else
+      let
+        e = readDir p;
+      in
+      listToAttrs (
+        map (n: {
+          name = n;
+          value = {
+            path = p + "/${n}";
+          };
+        }) (filter (n: e.${n} == "directory") (attrNames e))
+      );
 
   mkTemplates =
-    found:
-    builtins.mapAttrs (
+    src:
+    mapAttrs (
       name: entry:
       let
         f = entry.path + "/flake.nix";
       in
       {
         inherit (entry) path;
-        description = if builtins.pathExists f then (import f).description or name else name;
+        description = if pathExists f then (import f).description or name else name;
       }
-    ) found.templates;
+    ) (scanTemplates src);
 in
 {
   testTemplateNames = {
-    expr = builtins.sort builtins.lessThan (
-      builtins.attrNames (mkTemplates (discover.discoverAll (fixtures + "/full")))
-    );
+    expr = builtins.sort builtins.lessThan (builtins.attrNames (mkTemplates (fixtures + "/full")));
     expected = [
       "default"
       "minimal"
@@ -28,12 +55,12 @@ in
   };
 
   testTemplateDescription = {
-    expr = (mkTemplates (discover.discoverAll (fixtures + "/full"))).default.description;
+    expr = (mkTemplates (fixtures + "/full")).default.description;
     expected = "A default template";
   };
 
   testEmptyTemplates = {
-    expr = mkTemplates (discover.discoverAll (fixtures + "/empty"));
+    expr = mkTemplates (fixtures + "/empty");
     expected = { };
   };
 }

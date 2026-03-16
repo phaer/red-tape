@@ -128,7 +128,7 @@ let
     }
   ];
 
-  # ── Whole-tree discovery ───────────────────────────────────────────
+  # ── Scanning helpers ────────────────────────────────────────────────
 
   optional =
     path:
@@ -163,56 +163,6 @@ let
     else
       { };
 
-  discoverAll = src: {
-    packages =
-      optionalDefault (src + "/packages")
-      // optional (src + "/packages")
-      // optionalSingle (src + "/package.nix") "default";
-    devshells =
-      optionalDefault (src + "/devshells")
-      // optional (src + "/devshells")
-      // optionalSingle (src + "/devshell.nix") "default";
-    checks = optionalDefault (src + "/checks") // optional (src + "/checks");
-    hosts = scanHosts (src + "/hosts") coreHostTypes;
-    formatter = if pathExists (src + "/formatter.nix") then src + "/formatter.nix" else null;
-    templates =
-      if !pathExists (src + "/templates") then
-        { }
-      else
-        let
-          e = readDir (src + "/templates");
-        in
-        listToAttrs (
-          map (n: {
-            name = n;
-            value = {
-              path = src + "/templates/${n}";
-            };
-          }) (filter (n: e.${n} == "directory") (attrNames e))
-        );
-    modules =
-      let
-        p = src + "/modules";
-      in
-      if !pathExists p then
-        { }
-      else
-        let
-          e = readDir p;
-        in
-        listToAttrs (
-          map (n: {
-            name = n;
-            value = scanDir (p + "/${n}");
-          }) (filter (n: e.${n} == "directory") (attrNames e))
-        );
-    lib =
-      let
-        p = src + "/lib/default.nix";
-      in
-      if pathExists p then p else null;
-  };
-
 in
 {
   inherit
@@ -222,6 +172,5 @@ in
     optional
     optionalDefault
     optionalSingle
-    discoverAll
     ;
 }

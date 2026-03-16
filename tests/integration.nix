@@ -8,12 +8,14 @@ let
     discover
     helpers
     ;
+  inherit (discover) optional optionalDefault optionalSingle;
   inherit (helpers)
     callFile
     buildAll
     filterPlatforms
     withPrefix
     ;
+  inherit (builtins) pathExists;
 
   sort = builtins.sort builtins.lessThan;
   names = builtins.attrNames;
@@ -21,25 +23,33 @@ let
   evalFixture =
     src:
     let
-      found = discover.discoverAll src;
+      packages =
+        optionalDefault (src + "/packages")
+        // optional (src + "/packages")
+        // optionalSingle (src + "/package.nix") "default";
+      devshells =
+        optionalDefault (src + "/devshells")
+        // optional (src + "/devshells")
+        // optionalSingle (src + "/devshell.nix") "default";
+      checks = optionalDefault (src + "/checks") // optional (src + "/checks");
+      formatterPath =
+        let
+          p = src + "/formatter.nix";
+        in
+        if pathExists p then p else null;
+
       scope = {
         pkgs = mockPkgs;
         system = sys;
         lib = mockPkgs.lib;
       };
-      packages = filterPlatforms sys (buildAll scope found.packages);
-      devShells = buildAll scope found.devshells;
-      checks = filterPlatforms sys (buildAll scope found.checks);
-      formatter =
-        if found.formatter != null then callFile scope found.formatter { } else mockPkgs.nixfmt-tree;
     in
     {
-      inherit
-        packages
-        devShells
-        checks
-        formatter
-        ;
+      packages = filterPlatforms sys (buildAll scope packages);
+      devShells = buildAll scope devshells;
+      checks = filterPlatforms sys (buildAll scope checks);
+      formatter =
+        if formatterPath != null then callFile scope formatterPath { } else mockPkgs.nixfmt-tree;
     };
 
   full = evalFixture (fixtures + "/full");

@@ -2,9 +2,10 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) discover builders fixtures;
+  inherit (discover) scanHosts coreHostTypes;
   inherit (builders) buildHosts;
 
-  fullHosts = (discover.discoverAll (fixtures + "/full")).hosts;
+  fullHosts = scanHosts (fixtures + "/full/hosts") coreHostTypes;
 
   testResult = buildHosts {
     discovered = { inherit (fullHosts) custom; };
@@ -39,7 +40,7 @@ in
   testHostDiscoveryTypes = {
     expr =
       let
-        hosts = (discover.discoverAll (fixtures + "/full")).hosts;
+        hosts = scanHosts (fixtures + "/full/hosts") coreHostTypes;
       in
       {
         myhost = hosts.myhost.type;
