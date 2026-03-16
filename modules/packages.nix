@@ -1,7 +1,7 @@
 # red-tape/packages — Discover and build packages
 let
   inherit (import ../lib/utils.nix) buildAll filterPlatforms;
-  inherit (import ../lib/discover.nix) optional optionalDefault optionalSingle;
+  inherit (import ../lib/discover.nix) scanEntries;
 in
 {
   name = "packages";
@@ -21,10 +21,7 @@ in
     let
       s = results.scope;
       src = results.scan.resolvedSrc;
-      found =
-        optionalDefault (src + "/packages")
-        // optional (src + "/packages")
-        // optionalSingle (src + "/package.nix") "default";
+      found = scanEntries { dir = src + "/packages"; single = src + "/package.nix"; };
     in
     {
       packages = filterPlatforms s.system (

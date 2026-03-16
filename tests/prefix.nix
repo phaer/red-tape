@@ -1,13 +1,9 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) discover fixtures;
-  inherit (discover) optional optionalDefault optionalSingle;
+  inherit (discover) scanEntries;
 
-  scanPackages =
-    src:
-    optionalDefault (src + "/packages")
-    // optional (src + "/packages")
-    // optionalSingle (src + "/package.nix") "default";
+  scanPackages = src: scanEntries { dir = src + "/packages"; single = src + "/package.nix"; };
 in
 {
   testPrefixDiscovery = {

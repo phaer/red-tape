@@ -1,7 +1,7 @@
 # red-tape/devshells — Discover and build devshells
 let
   inherit (import ../lib/utils.nix) buildAll;
-  inherit (import ../lib/discover.nix) optional optionalDefault optionalSingle;
+  inherit (import ../lib/discover.nix) scanEntries;
 in
 {
   name = "devshells";
@@ -17,10 +17,7 @@ in
     { results, ... }:
     let
       src = results.scan.resolvedSrc;
-      found =
-        optionalDefault (src + "/devshells")
-        // optional (src + "/devshells")
-        // optionalSingle (src + "/devshell.nix") "default";
+      found = scanEntries { dir = src + "/devshells"; single = src + "/devshell.nix"; };
     in
     {
       devShells = buildAll results.scope.scope found;

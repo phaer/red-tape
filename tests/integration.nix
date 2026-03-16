@@ -8,7 +8,7 @@ let
     discover
     helpers
     ;
-  inherit (discover) optional optionalDefault optionalSingle;
+  inherit (discover) scanEntries;
   inherit (helpers)
     callFile
     buildAll
@@ -23,15 +23,9 @@ let
   evalFixture =
     src:
     let
-      packages =
-        optionalDefault (src + "/packages")
-        // optional (src + "/packages")
-        // optionalSingle (src + "/package.nix") "default";
-      devshells =
-        optionalDefault (src + "/devshells")
-        // optional (src + "/devshells")
-        // optionalSingle (src + "/devshell.nix") "default";
-      checks = optionalDefault (src + "/checks") // optional (src + "/checks");
+      packages = scanEntries { dir = src + "/packages"; single = src + "/package.nix"; };
+      devshells = scanEntries { dir = src + "/devshells"; single = src + "/devshell.nix"; };
+      checks = scanEntries { dir = src + "/checks"; };
       formatterPath =
         let
           p = src + "/formatter.nix";

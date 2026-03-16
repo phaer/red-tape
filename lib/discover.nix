@@ -163,6 +163,18 @@ let
     else
       { };
 
+  # Scan a directory for entries, with optional single-file fallback.
+  # Combines optionalDefault + optional + optionalSingle in one call.
+  #   scanEntries { dir = src + "/packages"; single = src + "/package.nix"; }
+  scanEntries =
+    {
+      dir ? null,
+      single ? null,
+      singleName ? "default",
+    }:
+    (if dir != null then optionalDefault dir // optional dir else { })
+    // (if single != null then optionalSingle single singleName else { });
+
 in
 {
   inherit
@@ -172,5 +184,6 @@ in
     optional
     optionalDefault
     optionalSingle
+    scanEntries
     ;
 }

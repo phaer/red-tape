@@ -5,9 +5,7 @@ let
     scanDir
     scanHosts
     coreHostTypes
-    optional
-    optionalDefault
-    optionalSingle
+    scanEntries
     ;
   inherit (builtins) attrNames pathExists readDir filter;
 
@@ -16,19 +14,9 @@ let
   fixtures = ../tests/fixtures;
 
   # Per-type scanning — mirrors what each module does internally
-  scanPackages =
-    src:
-    optionalDefault (src + "/packages")
-    // optional (src + "/packages")
-    // optionalSingle (src + "/package.nix") "default";
-
-  scanDevshells =
-    src:
-    optionalDefault (src + "/devshells")
-    // optional (src + "/devshells")
-    // optionalSingle (src + "/devshell.nix") "default";
-
-  scanChecks = src: optionalDefault (src + "/checks") // optional (src + "/checks");
+  scanPackages = src: scanEntries { dir = src + "/packages"; single = src + "/package.nix"; };
+  scanDevshells = src: scanEntries { dir = src + "/devshells"; single = src + "/devshell.nix"; };
+  scanChecks = src: scanEntries { dir = src + "/checks"; };
 
   scanFormatter =
     src:

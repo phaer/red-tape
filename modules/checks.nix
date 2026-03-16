@@ -1,7 +1,7 @@
 # red-tape/checks — Discover checks + auto-checks from packages/devshells/hosts
 let
   inherit (import ../lib/utils.nix) buildAll filterPlatforms withPrefix;
-  inherit (import ../lib/discover.nix) optional optionalDefault;
+  inherit (import ../lib/discover.nix) scanEntries;
   inherit (builtins)
     attrNames
     concatMap
@@ -42,7 +42,7 @@ in
       formatter = results.formatter.formatter;
       hostResult = results.hosts;
 
-      found = optionalDefault (src + "/checks") // optional (src + "/checks");
+      found = scanEntries { dir = src + "/checks"; };
       userChecks = filterPlatforms system (buildAll s.scope found);
 
       pkgChecks =
