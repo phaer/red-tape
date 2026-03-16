@@ -1,4 +1,7 @@
-# red-tape/lib — Import and expose the project's lib/default.nix
+# red-tape/lib — Discover and expose the project's lib/default.nix
+let
+  inherit (builtins) isFunction pathExists;
+in
 {
   name = "lib";
   inputs = {
@@ -9,14 +12,19 @@
   impl =
     { results, ... }:
     let
-      inherit (builtins) isFunction;
-      inherit (results.scan) discovered self inputs;
+      src = results.scan.resolvedSrc;
+      inherit (results.scan) self inputs;
+      libPath =
+        let
+          p = src + "/lib/default.nix";
+        in
+        if pathExists p then p else null;
       raw =
-        if discovered.lib == null then
+        if libPath == null then
           { }
         else
           let
-            m = import discovered.lib;
+            m = import libPath;
           in
           if isFunction m then
             m {

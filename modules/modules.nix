@@ -1,15 +1,20 @@
 # red-tape/modules — Discover and export NixOS/Darwin/Home modules
 let
   inherit (import ../lib/utils.nix) entryPath;
+  inherit (import ../lib/discover.nix) scanDir;
   inherit (builtins)
     all
     attrNames
     elem
+    filter
     foldl'
     functionArgs
     intersectAttrs
     isFunction
+    listToAttrs
     mapAttrs
+    pathExists
+    readDir
     ;
 
   defaultModuleTypes = {
@@ -82,12 +87,26 @@ in
   impl =
     { results, ... }:
     let
-      inherit (results.scan) discovered self inputs;
+      src = results.scan.resolvedSrc;
+      inherit (results.scan) self inputs;
+      p = src + "/modules";
+      discovered =
+        if !pathExists p then
+          { }
+        else
+          let
+            e = readDir p;
+          in
+          listToAttrs (
+            builtins.map (n: {
+              name = n;
+              value = scanDir (p + "/${n}");
+            }) (filter (n: e.${n} == "directory") (attrNames e))
+          );
     in
-    if discovered.modules != { } then
+    if discovered != { } then
       buildModules {
-        discovered = discovered.modules;
-        inherit inputs self;
+        inherit discovered inputs self;
         extraModuleTypes = results.contrib.moduleTypes;
       }
     else

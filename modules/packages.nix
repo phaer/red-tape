@@ -1,6 +1,7 @@
-# red-tape/packages — Build packages from discovered expressions
+# red-tape/packages — Discover and build packages
 let
   inherit (import ../lib/utils.nix) buildAll filterPlatforms;
+  inherit (import ../lib/discover.nix) optional optionalDefault optionalSingle;
 in
 {
   name = "packages";
@@ -19,11 +20,15 @@ in
     { results, ... }:
     let
       s = results.scope;
-      found = results.scan.discovered;
+      src = results.scan.resolvedSrc;
+      found =
+        optionalDefault (src + "/packages")
+        // optional (src + "/packages")
+        // optionalSingle (src + "/package.nix") "default";
     in
     {
       packages = filterPlatforms s.system (
-        buildAll s.scope found.packages // { formatter = results.formatter.formatter; }
+        buildAll s.scope found // { formatter = results.formatter.formatter; }
       );
     };
 }

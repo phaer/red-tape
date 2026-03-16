@@ -1,18 +1,12 @@
-# red-tape/scan — Pure filesystem discovery + shared flake context
+# red-tape/scan — Shared flake context (src, self, inputs)
 #
-# Result: { discovered, src, self, inputs }
-{ discover }:
-
+# Individual modules handle their own filesystem discovery.
+# Result: { resolvedSrc, src, self, inputs }
 let
   inherit (builtins) isPath removeAttrs;
 in
 {
   name = "scan";
-  inputs = {
-    contrib = {
-      path = "../contrib";
-    };
-  };
   options = {
     src = {
       type = {
@@ -46,7 +40,7 @@ in
     };
   };
   impl =
-    { options, results, ... }:
+    { options, ... }:
     let
       src = options.src;
       prefix = options.prefix;
@@ -55,12 +49,8 @@ in
         if prefix != null then (if isPath prefix then prefix else src + "/${prefix}") else src;
       inputs =
         (removeAttrs options.inputs [ "self" ]) // (if self != null then { inherit self; } else { });
-      hostTypes = discover.coreHostTypes ++ results.contrib.scanHostTypes;
     in
     {
-      discovered = discover.discoverAll resolvedSrc // {
-        hosts = discover.scanHosts (resolvedSrc + "/hosts") hostTypes;
-      };
-      inherit src self inputs;
+      inherit resolvedSrc src self inputs;
     };
 }

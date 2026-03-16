@@ -1,6 +1,7 @@
-# red-tape/checks — Build checks + auto-checks from packages/devshells/hosts
+# red-tape/checks — Discover checks + auto-checks from packages/devshells/hosts
 let
   inherit (import ../lib/utils.nix) buildAll filterPlatforms withPrefix;
+  inherit (import ../lib/discover.nix) optional optionalDefault;
   inherit (builtins)
     attrNames
     concatMap
@@ -35,13 +36,14 @@ in
     let
       s = results.scope;
       system = s.system;
-      found = results.scan.discovered;
+      src = results.scan.resolvedSrc;
       packages = results.packages.packages;
       devShells = results.devshells.devShells;
       formatter = results.formatter.formatter;
       hostResult = results.hosts;
 
-      userChecks = filterPlatforms system (buildAll s.scope found.checks);
+      found = optionalDefault (src + "/checks") // optional (src + "/checks");
+      userChecks = filterPlatforms system (buildAll s.scope found);
 
       pkgChecks =
         withPrefix "pkgs-" packages

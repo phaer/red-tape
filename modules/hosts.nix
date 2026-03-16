@@ -1,11 +1,11 @@
-# red-tape/hosts — Build host configurations
+# red-tape/hosts — Discover and build host configurations
 let
+  inherit (import ../lib/discover.nix) scanHosts coreHostTypes;
   inherit (builtins)
     addErrorContext
     attrNames
     filter
     foldl'
-    isAttrs
     listToAttrs
     map
     mapAttrs
@@ -133,12 +133,14 @@ in
   impl =
     { results, ... }:
     let
-      inherit (results.scan) discovered self inputs;
+      src = results.scan.resolvedSrc;
+      inherit (results.scan) self inputs;
+      hostTypes = coreHostTypes ++ results.contrib.scanHostTypes;
+      discovered = scanHosts (src + "/hosts") hostTypes;
     in
-    if discovered.hosts != { } then
+    if discovered != { } then
       buildHosts {
-        discovered = discovered.hosts;
-        inherit inputs self;
+        inherit discovered inputs self;
         extraHostTypes = results.contrib.hostTypes;
       }
     else

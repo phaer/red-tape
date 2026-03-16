@@ -45,7 +45,7 @@ let
         builtins.attrValues results
       );
     modules = {
-      scan = strip (import ./scan.nix { discover = import ../lib/discover.nix; });
+      scan = strip (import ./scan.nix);
       scope = strip (import ./scope.nix);
       packages = strip (import ./packages.nix);
       devshells = strip (import ./devshells.nix);

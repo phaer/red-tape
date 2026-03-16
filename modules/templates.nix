@@ -1,4 +1,15 @@
 # red-tape/templates — Discover template directories
+let
+  inherit (builtins)
+    attrNames
+    filter
+    listToAttrs
+    map
+    mapAttrs
+    pathExists
+    readDir
+    ;
+in
 {
   name = "templates";
   inputs = {
@@ -9,16 +20,33 @@
   impl =
     { results, ... }:
     let
-      inherit (builtins) mapAttrs pathExists;
-      found = results.scan.discovered;
-      templates = mapAttrs (name: e: {
-        inherit (e) path;
-        description =
+      src = results.scan.resolvedSrc;
+      p = src + "/templates";
+      found =
+        if !pathExists p then
+          { }
+        else
           let
-            f = e.path + "/flake.nix";
+            e = readDir p;
           in
-          if pathExists f then (import f).description or name else name;
-      }) found.templates;
+          listToAttrs (
+            map (n: {
+              name = n;
+              value = {
+                path = p + "/${n}";
+              };
+            }) (filter (n: e.${n} == "directory") (attrNames e))
+          );
+      templates = mapAttrs (
+        name: e:
+        let
+          f = e.path + "/flake.nix";
+        in
+        {
+          inherit (e) path;
+          description = if pathExists f then (import f).description or name else name;
+        }
+      ) found;
     in
-    if found.templates != { } then { inherit templates; } else { };
+    if found != { } then { inherit templates; } else { };
 }
