@@ -8,7 +8,7 @@ let
     ;
   inherit (helpers) entryPath;
   inherit (builders) buildModules;
-  inherit (discover) scanDir scanHosts coreHostTypes;
+  inherit (discover) scanDir scanHosts coreHostTypes scanSubdirs;
 in
 {
   testScanCustomHostType = {
@@ -94,14 +94,7 @@ in
   testExtraModuleTypes = {
     expr =
       let
-        modulesPath = fixtures + "/custom-modules/modules";
-        entries = builtins.readDir modulesPath;
-        discovered = builtins.listToAttrs (
-          builtins.map (n: {
-            name = n;
-            value = scanDir (modulesPath + "/${n}");
-          }) (builtins.filter (n: entries.${n} == "directory") (builtins.attrNames entries))
-        );
+        discovered = scanSubdirs (fixtures + "/custom-modules/modules") scanDir;
         result = buildModules {
           inherit discovered;
           extraModuleTypes = {

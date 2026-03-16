@@ -6,8 +6,9 @@ let
     scanHosts
     coreHostTypes
     scanEntries
+    scanSubdirs
     ;
-  inherit (builtins) attrNames pathExists readDir filter;
+  inherit (builtins) attrNames pathExists;
 
   sort = builtins.sort builtins.lessThan;
 
@@ -25,43 +26,8 @@ let
     in
     if pathExists p then p else null;
 
-  scanModules =
-    src:
-    let
-      p = src + "/modules";
-    in
-    if !pathExists p then
-      { }
-    else
-      let
-        e = readDir p;
-      in
-      builtins.listToAttrs (
-        builtins.map (n: {
-          name = n;
-          value = scanDir (p + "/${n}");
-        }) (filter (n: e.${n} == "directory") (attrNames e))
-      );
-
-  scanTemplates =
-    src:
-    let
-      p = src + "/templates";
-    in
-    if !pathExists p then
-      { }
-    else
-      let
-        e = readDir p;
-      in
-      builtins.listToAttrs (
-        builtins.map (n: {
-          name = n;
-          value = {
-            path = p + "/${n}";
-          };
-        }) (filter (n: e.${n} == "directory") (attrNames e))
-      );
+  scanModules = src: scanSubdirs (src + "/modules") scanDir;
+  scanTemplates = src: scanSubdirs (src + "/templates") (path: { inherit path; });
 
   scanLib =
     src:

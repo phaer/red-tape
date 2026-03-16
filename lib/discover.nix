@@ -163,6 +163,23 @@ let
     else
       { };
 
+  # Scan subdirectories of a path, applying f to each.
+  # Returns { name = f (path + "/${name}"); ... } or {} if path is missing.
+  scanSubdirs =
+    path: f:
+    if !pathExists path then
+      { }
+    else
+      let
+        entries = readDir path;
+      in
+      listToAttrs (
+        map (name: {
+          inherit name;
+          value = f (path + "/${name}");
+        }) (filter (name: entries.${name} == "directory") (attrNames entries))
+      );
+
   # Scan a directory for entries, with optional single-file fallback.
   # Combines optionalDefault + optional + optionalSingle in one call.
   #   scanEntries { dir = src + "/packages"; single = src + "/package.nix"; }
@@ -185,5 +202,6 @@ in
     optionalDefault
     optionalSingle
     scanEntries
+    scanSubdirs
     ;
 }

@@ -1,14 +1,7 @@
 # red-tape/templates — Discover template directories
 let
-  inherit (builtins)
-    attrNames
-    filter
-    listToAttrs
-    map
-    mapAttrs
-    pathExists
-    readDir
-    ;
+  inherit (import ../lib/discover.nix) scanSubdirs;
+  inherit (builtins) mapAttrs pathExists;
 in
 {
   name = "templates";
@@ -21,22 +14,7 @@ in
     { results, ... }:
     let
       src = results.scan.resolvedSrc;
-      p = src + "/templates";
-      found =
-        if !pathExists p then
-          { }
-        else
-          let
-            e = readDir p;
-          in
-          listToAttrs (
-            map (n: {
-              name = n;
-              value = {
-                path = p + "/${n}";
-              };
-            }) (filter (n: e.${n} == "directory") (attrNames e))
-          );
+      found = scanSubdirs (src + "/templates") (path: { inherit path; });
       templates = mapAttrs (
         name: e:
         let

@@ -2,25 +2,11 @@
 let
   prelude = import ./prelude.nix;
   inherit (prelude) discover builders fixtures;
-  inherit (discover) scanDir;
+  inherit (discover) scanDir scanSubdirs;
   inherit (builders) buildModules;
-  inherit (builtins) attrNames filter readDir;
-
-  scanModules =
-    src:
-    let
-      p = src + "/modules";
-      e = readDir p;
-    in
-    builtins.listToAttrs (
-      builtins.map (n: {
-        name = n;
-        value = scanDir (p + "/${n}");
-      }) (filter (n: e.${n} == "directory") (attrNames e))
-    );
 
   full = buildModules {
-    discovered = scanModules (fixtures + "/full");
+    discovered = scanSubdirs (fixtures + "/full/modules") scanDir;
   };
 
   empty = buildModules { discovered = { }; };
@@ -87,7 +73,7 @@ in
           outPath = "/my/flake";
         };
         result = buildModules {
-          discovered = scanModules (fixtures + "/full");
+          discovered = scanSubdirs (fixtures + "/full/modules") scanDir;
           inputs = {
             nixpkgs = "fake-nixpkgs";
             self = fakeSelf;
