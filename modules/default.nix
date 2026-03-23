@@ -1,10 +1,8 @@
 # red-tape — Composable adios module tree
 #
 # Each sub-module handles one concern. The top-level module aggregates
-# results so adios-flake's _collector/_flake can route them.
+# results so adios-flake's internal collectors can route them.
 let
-  strip = m: builtins.removeAttrs m [ "name" ];
-
   default = {
     name = "red-tape";
     outputs = {
@@ -45,17 +43,17 @@ let
         builtins.attrValues results
       );
     modules = {
-      scan = strip (import ./scan.nix);
-      scope = strip (import ./scope.nix);
-      packages = strip (import ./packages.nix);
-      devshells = strip (import ./devshells.nix);
+      scan = import ./scan.nix;
+      scope = import ./scope.nix;
+      packages = import ./packages.nix;
+      devshells = import ./devshells.nix;
       formatter = import ./formatter.nix;
-      checks = strip (import ./checks.nix);
-      hosts = strip (import ./hosts.nix);
-      modules = strip (import ./modules.nix);
-      templates = strip (import ./templates.nix);
-      lib = strip (import ./lib.nix);
-      contrib = strip (import ./contrib.nix);
+      checks = import ./checks.nix;
+      hosts = import ./hosts.nix;
+      modules = import ./modules.nix;
+      templates = import ./templates.nix;
+      lib = import ./lib.nix;
+      contrib = import ./contrib.nix;
     };
   };
 in

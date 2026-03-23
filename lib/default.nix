@@ -4,8 +4,6 @@ let
   adiosFlakeLib = adios-flake.lib or adios-flake;
   defaultModules = import ../modules;
 
-  strip = m: builtins.removeAttrs m [ "name" ];
-
   # Build the red-tape root module with contrib submodules dynamically wired.
   # Each contrib module becomes a child of the contrib collector, which
   # aggregates their results for scan/hosts/modules to consume via inputs.
@@ -17,7 +15,7 @@ let
       # Wire each contrib as a submodule with an input in the collector
       numberedContribs = builtins.genList (i: {
         name = "_c${toString i}";
-        value = strip (builtins.elemAt contribs i);
+        value = builtins.removeAttrs (builtins.elemAt contribs i) [ "name" ];
       }) (builtins.length contribs);
       contribChildren = builtins.listToAttrs numberedContribs;
       contribInputs = builtins.listToAttrs (
