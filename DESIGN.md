@@ -33,7 +33,7 @@ Building:
 
 [adios-flake](https://github.com/Mic92/adios-flake) modules that handle both discovery and building for their output type. adios-flake is a flake-output wrapper around [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering.
 
-Each module imports the scanning primitives it needs from `lib/internal.nix` and scans the filesystem itself. The `scan` module is a thin context provider (`resolvedSrc`, `self`, `inputs`).
+Each module imports the primitives it needs from `lib/internal.nix` and scans the filesystem itself. The `scan` module is a thin context provider (`resolvedSrc`, `self`, `inputs`).
 
 ```
 scan ──→ scope ──→ packages  (scans packages/, package.nix)

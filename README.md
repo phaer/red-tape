@@ -82,11 +82,13 @@ red-tape.mkFlake {
 
 ## Auto-Checks
 
-red-tape automatically adds packages and devshells to `checks`:
+red-tape automatically adds packages, devshells, the formatter, and host configurations to `checks`:
 
 - Each package becomes `checks.${system}.pkgs-${name}`
 - Each devshell becomes `checks.${system}.devshell-${name}`
 - Each package's `passthru.tests` are included as `checks.${system}.pkgs-${name}-${test}`
+- The formatter becomes `checks.${system}.pkgs-formatter`
+- Each host configuration becomes `checks.${system}.${type}-${name}` (e.g. `nixos-myhost`)
 
 Run all checks with:
 
