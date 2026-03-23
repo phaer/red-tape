@@ -1,6 +1,6 @@
 # red-tape/formatter — Discover or default the formatter
 let
-  inherit (import ../lib/utils.nix) callFile;
+  inherit (import ../lib/internal.nix) callFile;
   inherit (builtins) pathExists;
 in
 {

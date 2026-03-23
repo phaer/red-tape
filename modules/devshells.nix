@@ -1,7 +1,6 @@
 # red-tape/devshells — Discover and build devshells
 let
-  inherit (import ../lib/utils.nix) buildAll;
-  inherit (import ../lib/discover.nix) scanEntries;
+  inherit (import ../lib/internal.nix) buildAll scanEntries;
 in
 {
   name = "devshells";

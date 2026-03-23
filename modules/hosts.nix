@@ -1,6 +1,6 @@
 # red-tape/hosts — Discover and build host configurations
 let
-  inherit (import ../lib/discover.nix) scanHosts;
+  inherit (import ../lib/internal.nix) scanHosts;
 
   # Host type sentinels — checked in order, first match wins.
   coreHostTypes = [

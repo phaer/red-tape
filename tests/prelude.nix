@@ -1,6 +1,6 @@
 # Test prelude — shared setup for all test files
 let
-  discover = import ../lib/discover.nix;
+  discover = import ../lib/internal.nix;
 
   lib = { };
 
@@ -43,7 +43,7 @@ let
   sys = "x86_64-linux";
   fixtures = ../tests/fixtures;
 
-  helpers = import ../lib/utils.nix;
+  helpers = import ../lib/internal.nix;
 
   # Domain builders — extracted for direct testing without adios runtime
   inherit (builtins)

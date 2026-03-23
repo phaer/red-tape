@@ -1,7 +1,6 @@
 # red-tape/modules — Discover and export NixOS/Darwin/Home modules
 let
-  inherit (import ../lib/utils.nix) entryPath;
-  inherit (import ../lib/discover.nix) scanDir scanSubdirs;
+  inherit (import ../lib/internal.nix) entryPath scanDir scanSubdirs;
   inherit (builtins)
     all
     attrNames

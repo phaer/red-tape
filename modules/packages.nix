@@ -1,7 +1,6 @@
 # red-tape/packages — Discover and build packages
 let
-  inherit (import ../lib/utils.nix) buildAll filterPlatforms;
-  inherit (import ../lib/discover.nix) scanEntries;
+  inherit (import ../lib/internal.nix) buildAll filterPlatforms scanEntries;
 in
 {
   name = "packages";

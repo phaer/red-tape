@@ -1,31 +1,22 @@
-# discover.nix — Scanning primitives for filesystem-based discovery
-#
-# Expected project layout:
-#
-#   src/
-#   ├── package.nix | packages/{name}.nix | packages/{name}/default.nix
-#   ├── devshell.nix | devshells/{name}.nix
-#   ├── formatter.nix
-#   ├── checks/{name}.nix
-#   ├── hosts/{name}/configuration.nix  (nixos)
-#   │               /default.nix  (custom)
-#   ├── modules/{type}/{name}.nix
-#   ├── templates/{name}/flake.nix
-#   └── lib/default.nix
-#
+# Internal scanning and builder primitives used by red-tape modules
 let
   inherit (builtins)
+    addErrorContext
     attrNames
+    elem
     filter
+    functionArgs
     head
+    intersectAttrs
     listToAttrs
     map
+    mapAttrs
     match
     pathExists
     readDir
     ;
 
-  # ── Core primitive ─────────────────────────────────────────────────
+  # ── Scanning primitives ────────────────────────────────────────────
 
   # Scan a directory for .nix files and subdirectories with default.nix.
   # Returns { name = { path; type = "file"|"directory"; }; ... }
@@ -77,8 +68,6 @@ let
       in
       dirs // files;
 
-  # ── Derived scanners ───────────────────────────────────────────────
-
   # Like scanDir but for hosts: walks subdirs looking for sentinel files
   # (e.g. configuration.nix) to determine host type.
   # Returns { name = { type; configPath; hostPath; }; ... }.
@@ -116,41 +105,6 @@ let
         )
       );
 
-  # ── Scanning helpers ────────────────────────────────────────────────
-
-  optional =
-    path:
-    let
-      v = scanDir path;
-    in
-    if v == { } then { } else v;
-
-  # scanDir skips bare default.nix in the scanned directory itself.
-  # optionalDefault adds it back as the "default" entry when present.
-  optionalDefault =
-    path:
-    if pathExists (path + "/default.nix") then
-      {
-        default = {
-          path = path + "/default.nix";
-          type = "file";
-        };
-      }
-    else
-      { };
-
-  optionalSingle =
-    path: name:
-    if pathExists path then
-      {
-        ${name} = {
-          inherit path;
-          type = "file";
-        };
-      }
-    else
-      { };
-
   # Scan subdirectories of a path, applying f to each.
   # Returns { name = f (path + "/${name}"); ... } or {} if path is missing.
   scanSubdirs =
@@ -169,7 +123,6 @@ let
       );
 
   # Scan a directory for entries, with optional single-file fallback.
-  # Combines optionalDefault + optional + optionalSingle in one call.
   #   scanEntries { dir = src + "/packages"; single = src + "/package.nix"; }
   scanEntries =
     {
@@ -177,18 +130,87 @@ let
       single ? null,
       singleName ? "default",
     }:
-    (if dir != null then optionalDefault dir // optional dir else { })
+    let
+      optionalDefault =
+        path:
+        if pathExists (path + "/default.nix") then
+          {
+            default = {
+              path = path + "/default.nix";
+              type = "file";
+            };
+          }
+        else
+          { };
+      optionalSingle =
+        path: name:
+        if pathExists path then
+          {
+            ${name} = {
+              inherit path;
+              type = "file";
+            };
+          }
+        else
+          { };
+    in
+    (if dir != null then optionalDefault dir // scanDir dir else { })
     // (if single != null then optionalSingle single singleName else { });
 
+  # ── Builder helpers ────────────────────────────────────────────────
+
+  entryPath = e: if e.type == "directory" then e.path + "/default.nix" else e.path;
+
+  callFile =
+    scope: path: extra:
+    addErrorContext "while evaluating '${toString path}'" (
+      let
+        fn = import path;
+      in
+      fn (intersectAttrs (functionArgs fn) (scope // extra))
+    );
+
+  buildAll = scope: mapAttrs (pname: e: callFile scope (entryPath e) { inherit pname; });
+
+  filterPlatforms =
+    system: a:
+    listToAttrs (
+      filter (x: x != null) (
+        map (
+          n:
+          let
+            p = a.${n}.meta.platforms or [ ];
+          in
+          if p == [ ] || elem system p then
+            {
+              name = n;
+              value = a.${n};
+            }
+          else
+            null
+        ) (attrNames a)
+      )
+    );
+
+  withPrefix =
+    pre: a:
+    listToAttrs (
+      map (n: {
+        name = "${pre}${n}";
+        value = a.${n};
+      }) (attrNames a)
+    );
 in
 {
   inherit
     scanDir
     scanHosts
-    optional
-    optionalDefault
-    optionalSingle
-    scanEntries
     scanSubdirs
+    scanEntries
+    entryPath
+    callFile
+    buildAll
+    filterPlatforms
+    withPrefix
     ;
 }

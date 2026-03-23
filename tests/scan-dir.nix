@@ -1,6 +1,6 @@
 # Tests for scanDir
 let
-  discover = import ../lib/discover.nix;
+  discover = import ../lib/internal.nix;
   inherit (discover) scanDir;
   fixtures = ../tests/fixtures;
   full = fixtures + "/full";

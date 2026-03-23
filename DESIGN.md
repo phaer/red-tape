@@ -3,7 +3,7 @@
 ## Architecture Overview
 
 ```
-lib/discover.nix    Scanning primitives (scanDir, scanEntries, scanSubdirs, …)
+lib/internal.nix     Scanning and builder primitives
         ↑
 modules/*           adios-flake modules (each imports the primitives it needs)
         ↓
@@ -12,26 +12,34 @@ lib/default.nix     Entry point: mkFlake + module re-export
 flake.nix           Public API
 ```
 
-### lib/discover.nix
+### lib/internal.nix
 
-Scanning primitives used by individual modules. No evaluation happens here — only `builtins.readDir`, `builtins.pathExists`, and path construction.
+Scanning and builder primitives used by individual modules. Scanning functions only use `builtins.readDir`, `builtins.pathExists`, and path construction — no evaluation happens.
 
+Scanning:
 - **`scanDir path`** — Reads a directory and returns `{ name = { path; type; }; }` for each `.nix` file or subdirectory with `default.nix`. Strips `.nix` extensions.
 - **`scanHosts hostsDir hostTypes`** — Scans `hosts/` subdirectories, matching against an ordered list of `{ type, file }` specs. First match wins.
 - **`scanEntries { dir?, single?, singleName? }`** — Scans a directory for entries with optional single-file fallback. Used by packages, devshells, and checks.
 - **`scanSubdirs path f`** — Lists subdirectories of a path and applies `f` to each. Used by modules (`scanSubdirs p scanDir`) and templates (`scanSubdirs p (p: { path = p; })`).
 
+Building:
+- **`callFile scope path extra`** — Calls a Nix file with the scope attrset, using `builtins.functionArgs` to determine which arguments to pass.
+- **`entryPath entry`** — Extracts the filesystem path from a discovered entry.
+- **`buildAll scope discovered`** — Maps `callFile` over all discovered entries.
+- **`filterPlatforms system pkgs`** — Filters packages by `meta.platforms` (keeps those matching `system` or having no platform restriction).
+- **`withPrefix prefix attrs`** — Prepends a string prefix to all attribute names.
+
 ### modules/
 
 [adios-flake](https://github.com/Mic92/adios-flake) modules that handle both discovery and building for their output type. adios-flake is a flake-output wrapper around [adios](https://github.com/adisbladis/adios), a lightweight module system with explicit dependency declaration and topological ordering.
 
-Each module imports the scanning primitives it needs from `lib/discover.nix` and scans the filesystem itself. The `scan` module is a thin context provider (`resolvedSrc`, `self`, `inputs`).
+Each module imports the scanning primitives it needs from `lib/internal.nix` and scans the filesystem itself. The `scan` module is a thin context provider (`resolvedSrc`, `self`, `inputs`).
 
 ```
 scan ──→ scope ──→ packages  (scans packages/, package.nix)
               ├──→ devshells (scans devshells/, devshell.nix)
               ├──→ formatter (scans formatter.nix)
-              └──→ checks    (scans checks/; also depends on packages, devshells, hosts)
+              └──→ checks    (scans checks/; also depends on packages, devshells, formatter, hosts)
 
 scan ──→ hosts      (scans hosts/ via scanHosts; depends on contrib)
     ├──→ modules    (scans modules/{type}/; depends on contrib)
@@ -42,16 +50,6 @@ scan ──→ hosts      (scans hosts/ via scanHosts; depends on contrib)
 **Per-system modules** (packages, devshells, formatter, checks) depend on `scope` which provides `{ system, pkgs, lib, flake, inputs, perSystem }`.
 
 **System-agnostic modules** (hosts, modules, templates, lib) depend only on `scan` (plus `contrib` where extensible).
-
-### lib/utils.nix
-
-Shared helper functions used by multiple modules:
-
-- **`callFile scope path`** — Calls a Nix file with the scope attrset, using `builtins.functionArgs` to determine which arguments to pass.
-- **`entryPath name info`** — Extracts the filesystem path from a discovered entry.
-- **`buildAll scope discovered`** — Maps `callFile` over all discovered entries.
-- **`filterPlatforms system pkgs`** — Filters packages by `meta.platforms` (keeps those matching `system` or having no platform restriction).
-- **`withPrefix prefix attrs`** — Prepends a string prefix to all attribute names.
 
 ## Design Decisions
 

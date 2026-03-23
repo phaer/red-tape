@@ -1,6 +1,6 @@
 # red-tape/templates — Discover template directories
 let
-  inherit (import ../lib/discover.nix) scanSubdirs;
+  inherit (import ../lib/internal.nix) scanSubdirs;
   inherit (builtins) mapAttrs pathExists;
 in
 {

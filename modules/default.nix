@@ -49,7 +49,7 @@ let
       scope = strip (import ./scope.nix);
       packages = strip (import ./packages.nix);
       devshells = strip (import ./devshells.nix);
-      formatter = strip (import ./formatter.nix);
+      formatter = import ./formatter.nix;
       checks = strip (import ./checks.nix);
       hosts = strip (import ./hosts.nix);
       modules = strip (import ./modules.nix);

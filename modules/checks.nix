@@ -1,7 +1,6 @@
 # red-tape/checks — Discover checks + auto-checks from packages/devshells/hosts
 let
-  inherit (import ../lib/utils.nix) buildAll filterPlatforms withPrefix;
-  inherit (import ../lib/discover.nix) scanEntries;
+  inherit (import ../lib/internal.nix) buildAll filterPlatforms withPrefix scanEntries;
   inherit (builtins)
     attrNames
     concatMap
