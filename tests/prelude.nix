@@ -114,6 +114,13 @@ let
       discovered,
       inputs ? { },
       self ? null,
+      defaultSystem ? "x86_64-linux",
+      pkgsFor ? (
+        system: {
+          _type = "pkgs";
+          inherit system;
+        }
+      ),
       extraHostTypes ? { },
     }:
     let
@@ -134,14 +141,18 @@ let
             {
               type = info.type;
               outputKey = builder.outputKey;
-              value = builder.build {
-                inherit
-                  name
-                  info
-                  specialArgs
-                  inputs
-                  ;
-              };
+              value = builder.build (
+                intersectAttrs (functionArgs builder.build) {
+                  inherit
+                    name
+                    info
+                    specialArgs
+                    inputs
+                    pkgsFor
+                    ;
+                  system = defaultSystem;
+                }
+              );
             }
         );
       loaded = mapAttrs loadHost discovered;

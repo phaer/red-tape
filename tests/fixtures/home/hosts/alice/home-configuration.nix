@@ -1,0 +1,4 @@
+# Test stub (default system).
+{ ... }:
+{
+}

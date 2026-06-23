@@ -18,6 +18,8 @@ let
     attrNames
     filter
     foldl'
+    functionArgs
+    intersectAttrs
     listToAttrs
     map
     mapAttrs
@@ -61,6 +63,8 @@ let
       discovered,
       inputs,
       self,
+      defaultSystem,
+      pkgsFor,
       extraHostTypes ? { },
     }:
     let
@@ -82,14 +86,18 @@ let
             {
               type = info.type;
               outputKey = builder.outputKey;
-              value = builder.build {
-                inherit
-                  name
-                  info
-                  specialArgs
-                  inputs
-                  ;
-              };
+              value = builder.build (
+                intersectAttrs (functionArgs builder.build) {
+                  inherit
+                    name
+                    info
+                    specialArgs
+                    inputs
+                    pkgsFor
+                    ;
+                  system = defaultSystem;
+                }
+              );
             }
         );
 
@@ -146,13 +154,24 @@ in
     { results, ... }:
     let
       src = results.project.resolvedSrc;
-      inherit (results.project) self inputs;
+      inherit (results.project)
+        self
+        inputs
+        defaultSystem
+        pkgsFor
+        ;
       hostTypes = coreHostTypes ++ results.contrib.scanHostTypes;
       discovered = scanHosts (src + "/hosts") hostTypes;
     in
     if discovered != { } then
       buildHosts {
-        inherit discovered inputs self;
+        inherit
+          discovered
+          inputs
+          self
+          defaultSystem
+          pkgsFor
+          ;
         extraHostTypes = results.contrib.hostTypes;
       }
     else

@@ -1,9 +1,9 @@
 # red-tape/project — Project-level flake context (src, self, inputs)
 #
 # Individual modules handle their own filesystem discovery.
-# Result: { resolvedSrc, src, self, inputs }
+# Result: { resolvedSrc, src, self, inputs, systems, defaultSystem, pkgsFor }
 let
-  inherit (builtins) isPath removeAttrs;
+  inherit (builtins) head isPath removeAttrs;
 in
 {
   name = "project";
@@ -38,6 +38,23 @@ in
       };
       default = { };
     };
+    systems = {
+      type = {
+        name = "list-of-string";
+        verify =
+          v:
+          if builtins.isList v && builtins.all builtins.isString v then
+            null
+          else
+            "expected a list of system strings";
+      };
+      default = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
+      ];
+    };
   };
   impl =
     { options, ... }:
@@ -45,10 +62,14 @@ in
       src = options.src;
       prefix = options.prefix;
       self = options.self;
+      systems = options.systems;
       resolvedSrc =
         if prefix != null then (if isPath prefix then prefix else src + "/${prefix}") else src;
       inputs =
         (removeAttrs options.inputs [ "self" ]) // (if self != null then { inherit self; } else { });
+      defaultSystem =
+        if systems == [ ] then throw "red-tape: `systems` must not be empty" else head systems;
+      pkgsFor = system: import inputs.nixpkgs { inherit system; };
     in
     {
       inherit
@@ -56,6 +77,9 @@ in
         src
         self
         inputs
+        systems
+        defaultSystem
+        pkgsFor
         ;
     };
 }

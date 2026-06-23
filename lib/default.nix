@@ -71,7 +71,7 @@ let
       modules = [ (mkRootModule contribs) ] ++ passthrough;
       config = {
         "red-tape/project" = {
-          inherit src self;
+          inherit src self systems;
           inputs = inputs;
         }
         // (if prefix != null then { inherit prefix; } else { });
