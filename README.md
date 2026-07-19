@@ -127,6 +127,11 @@ This adds:
 - `home-configuration.nix` → `homeConfigurations` + `modules/home/` → `homeModules` (via home-manager)
 - `system-configuration.nix` → `systemConfigs` (via system-manager)
 
+home-manager needs a concrete `pkgs` (it can't infer the platform like `nixosSystem`), so
+`homeConfigurations` are built for the first entry of `systems` by default. A host can override
+this by placing a `system.nix` next to its `home-configuration.nix` that returns a system
+string, e.g. `"aarch64-darwin"`.
+
 ## Module Types
 
 By default, only `modules/nixos/` → `nixosModules` is wired. Contrib modules add more:

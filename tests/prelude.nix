@@ -61,123 +61,35 @@ let
     map
     mapAttrs
     ;
-  inherit (helpers) entryPath;
+  inherit (helpers) entryPath coreHostTypes;
 
-  # Host type sentinels for scanning — matches modules/hosts.nix
-  coreHostTypes = [
-    {
-      type = "custom";
-      file = "default.nix";
-    }
-    {
-      type = "nixos";
-      file = "configuration.nix";
-    }
-  ];
-
-  # Host type builders for testing
-  defaultHostTypes = {
-    custom = {
-      outputKey = "nixosConfigurations";
-      build =
-        {
-          name,
-          info,
-          specialArgs,
-          inputs,
-        }:
-        import info.configPath {
-          inherit (specialArgs) flake inputs;
-          hostName = name;
-        };
-    };
-    nixos = {
-      outputKey = "nixosConfigurations";
-      build =
-        {
-          name,
-          info,
-          specialArgs,
-          inputs,
-        }:
-        inputs.nixpkgs.lib.nixosSystem {
-          modules = [ info.configPath ];
-          specialArgs = specialArgs // {
-            hostName = name;
-          };
-        };
-    };
-  };
-
+  # Thin shim over the real lib/internal.nix buildHosts: fills test-only
+  # defaults (flake context + a stub pkgsFor) so call sites stay terse while
+  # exercising the real build logic.
   buildHosts =
     {
       discovered,
       inputs ? { },
       self ? null,
+      defaultSystem ? sys,
+      pkgsFor ? (
+        system: {
+          _type = "pkgs";
+          inherit system;
+        }
+      ),
       extraHostTypes ? { },
     }:
-    let
-      specialArgs = {
-        flake = self;
-        inherit inputs;
-      };
-      hostTypes = defaultHostTypes // extraHostTypes;
-      loadHost =
-        name: info:
-        addErrorContext "while building host '${name}' (${info.type})" (
-          let
-            builder = hostTypes.${info.type} or null;
-          in
-          if builder == null then
-            throw "red-tape: unknown host type '${info.type}' for '${name}'"
-          else
-            {
-              type = info.type;
-              outputKey = builder.outputKey;
-              value = builder.build {
-                inherit
-                  name
-                  info
-                  specialArgs
-                  inputs
-                  ;
-              };
-            }
-        );
-      loaded = mapAttrs loadHost discovered;
-      byOutputKey = foldl' (
-        acc: n:
-        let
-          h = loaded.${n};
-          key = h.outputKey;
-        in
-        acc
-        // {
-          ${key} = (acc.${key} or { }) // {
-            ${n} = h.value;
-          };
-        }
-      ) { } (attrNames loaded);
-      autoChecks =
-        system:
-        listToAttrs (filter (x: x != null) (
-          map (
-            n:
-            let
-              h = loaded.${n};
-              s = h.value.config.nixpkgs.hostPlatform.system or null;
-            in
-            if s == system then
-              {
-                name = "${h.type}-${n}";
-                value = h.value.config.system.build.toplevel;
-              }
-            else
-              null
-          ) (attrNames loaded)
-        )) { } (attrNames byOutputKey);
-    in
-    byOutputKey // { inherit autoChecks; };
+    helpers.buildHosts {
+      inherit
+        discovered
+        inputs
+        self
+        defaultSystem
+        pkgsFor
+        extraHostTypes
+        ;
+    };
 
   defaultModuleTypes = {
     nixos = "nixosModules";

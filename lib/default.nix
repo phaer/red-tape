@@ -45,12 +45,7 @@ let
       self ? null,
       src,
       prefix ? null,
-      systems ? [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-        "x86_64-darwin"
-      ],
+      systems ? inputs.nixpkgs.lib.systems.flakeExposed,
       modules ? [ ],
       perSystem ? null,
       config ? { },
@@ -71,7 +66,7 @@ let
       modules = [ (mkRootModule contribs) ] ++ passthrough;
       config = {
         "red-tape/project" = {
-          inherit src self;
+          inherit src self systems;
           inputs = inputs;
         }
         // (if prefix != null then { inherit prefix; } else { });

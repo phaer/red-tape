@@ -15,6 +15,21 @@ let
   testResult = buildHosts {
     discovered = { inherit (fullHosts) custom; };
   };
+
+  homeManager = (import ../contrib/home-manager.nix).impl { };
+  homeHostTypes = coreHostTypes ++ homeManager.scanHostTypes;
+  homeHosts = scanHosts (fixtures + "/home/hosts") homeHostTypes;
+
+  homeResult = buildHosts {
+    discovered = homeHosts;
+    inputs = {
+      home-manager = {
+        lib.homeManagerConfiguration = args: args;
+      };
+    };
+    extraHostTypes = homeManager.hostTypes;
+    defaultSystem = "x86_64-linux";
+  };
 in
 {
   testCustomHostLoaded = {
@@ -55,5 +70,23 @@ in
       myhost = "nixos";
       custom = "custom";
     };
+  };
+
+  testHomeConfigurationGetsDefaultPkgs = {
+    expr = homeResult.homeConfigurations.alice.pkgs.system;
+    expected = "x86_64-linux";
+  };
+
+  testHomeConfigurationSystemOverride = {
+    expr = homeResult.homeConfigurations.bob.pkgs.system;
+    expected = "aarch64-darwin";
+  };
+
+  testHomeConfigurationOutputKey = {
+    expr = builtins.attrNames homeResult.homeConfigurations;
+    expected = [
+      "alice"
+      "bob"
+    ];
   };
 }
